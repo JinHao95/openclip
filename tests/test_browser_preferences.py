@@ -8,6 +8,7 @@ from core.browser_preferences import (
     serialize_preferences_payload,
 )
 from core.browser_session import INPUT_TYPE_URL
+from core.clip_duration import DEFAULT_CLIP_LENGTH_PRESET
 
 
 def _default_data():
@@ -24,6 +25,7 @@ def _default_data():
         "force_whisper": False,
         "generate_clips": True,
         "max_clips": 5,
+        "clip_length_preset": DEFAULT_CLIP_LENGTH_PRESET,
         "add_titles": False,
         "burn_subtitles": False,
         "subtitle_translation": None,
@@ -54,6 +56,7 @@ def test_build_preferences_payload_uses_allowlist_and_excludes_sensitive_fields(
 
     prefs = payload["prefs"]
     assert prefs["ui_language"] == "zh"
+    assert prefs["clip_length_preset"] == DEFAULT_CLIP_LENGTH_PRESET
     assert prefs["llm_provider_settings"]["openai"] == {
         "model": "gpt",
         "base_url": "https://example.com",
@@ -127,6 +130,7 @@ def test_merge_browser_preferences_invalid_values_fall_back_to_defaults():
             "subtitle_style_preset": "weird",
             "subtitle_translation": "Klingon",
             "max_clips": -5,
+            "clip_length_preset": "bogus",
             "generate_clips": "yes",
         },
     }
@@ -139,6 +143,7 @@ def test_merge_browser_preferences_invalid_values_fall_back_to_defaults():
     assert merged["subtitle_style_preset"] == defaults["subtitle_style_preset"]
     assert merged["subtitle_translation"] == defaults["subtitle_translation"]
     assert merged["max_clips"] == defaults["max_clips"]
+    assert merged["clip_length_preset"] == defaults["clip_length_preset"]
     assert merged["generate_clips"] == defaults["generate_clips"]
 
 

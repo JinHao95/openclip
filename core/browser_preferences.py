@@ -5,6 +5,7 @@ import copy
 import json
 from typing import Any, Mapping
 
+from core.clip_duration import CLIP_DURATION_PRESETS
 from core.browser_session import normalize_input_type
 
 PREFERENCES_COOKIE_NAME = "openclip_sidebar_prefs"
@@ -22,6 +23,7 @@ PERSISTED_TOP_LEVEL_FIELDS = {
     "force_whisper",
     "generate_clips",
     "max_clips",
+    "clip_length_preset",
     "add_titles",
     "burn_subtitles",
     "subtitle_translation",
@@ -49,6 +51,7 @@ SAFE_ENUM_FIELDS = {
     "subtitle_style_vertical_position": {"bottom", "lower_middle", "middle"},
     "subtitle_style_background_style": {"none", "light_box", "solid_box"},
     "mode": {"engaging_moments"},
+    "clip_length_preset": set(CLIP_DURATION_PRESETS.keys()),
 }
 
 BOOLEAN_FIELDS = {

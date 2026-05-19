@@ -4,6 +4,7 @@ import time
 from pathlib import Path
 
 from core.analysis_coordinator import AnalysisCoordinator
+from core.clip_duration import get_clip_duration_preference
 
 
 class _FakeLLMClient:
@@ -319,6 +320,46 @@ def test_pre_verify_shortlist_can_be_larger_than_final_clip_cap(tmp_path):
     assert plan["pre_verify_pool_size"] == 4
     assert pre_verify["total_moments"] == 3
     assert result["top_moments"]["total_moments"] == 1
+
+
+def test_agentic_plan_and_duration_check_use_clip_length_preference(tmp_path):
+    transcript_path = tmp_path / "part01.srt"
+    _write_transcript(transcript_path)
+    analyzer = _FakeAnalyzer(tmp_path, llm_responses=[], max_clips=1)
+    analyzer.clip_duration_preference = get_clip_duration_preference("180_300")
+    coordinator = AnalysisCoordinator(analyzer)
+    valid_candidate = {
+        "timing": {
+            "start_time": "00:00:00",
+            "end_time": "00:03:20",
+        }
+    }
+    short_candidate = {
+        "timing": {
+            "start_time": "00:00:00",
+            "end_time": "00:01:30",
+        }
+    }
+
+    assert coordinator._check_duration(valid_candidate) == (True, 200)
+    assert coordinator._check_duration(short_candidate) == (False, 90)
+
+    plan = coordinator._build_analysis_plan([str(transcript_path)])
+
+    assert plan["clip_duration_preference"]["preset"] == "180_300"
+    assert plan["clip_duration_preference"]["max_seconds"] == 300
+    assert "3m-5m" in coordinator._build_verification_prompt(
+        {
+            "title": "Long arc",
+            "summary": "A complete long discussion arc.",
+            "why_engaging": "It develops a complete point.",
+            "timing": {
+                "start_time": "00:00:00",
+                "end_time": "00:03:20",
+            },
+        },
+        {"actual_clip_excerpt": "A complete long discussion arc."},
+    )
 
 
 def test_agentic_analysis_repair_fills_gap_with_repaired_clip(tmp_path):

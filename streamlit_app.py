@@ -40,6 +40,7 @@ from core.subtitle_burner import SubtitleBurner, SubtitleStyleConfig
 from video_orchestrator import VideoOrchestrator
 from core.video_utils import VideoFileValidator
 from core.config import API_KEY_ENV_VARS, DEFAULT_LLM_PROVIDER, DEFAULT_TITLE_STYLE, MAX_DURATION_MINUTES, WHISPER_MODEL, MAX_CLIPS, LLM_CONFIG, SUPPORTED_LLM_PROVIDERS
+from core.clip_duration import CLIP_DURATION_PRESETS, DEFAULT_CLIP_LENGTH_PRESET, normalize_clip_length_preset
 from core.transcript_generation_whisperx import WHISPERX_AVAILABLE
 from core.editor import ensure_editor_service
 from core.downloaders.bilibili_downloader import ImprovedBilibiliDownloader
@@ -202,6 +203,8 @@ TRANSLATIONS = {
         'force_whisper': 'Force Local ASR Subtitles',
         'generate_clips': 'Generate Clips',
         'max_clips': 'Max Clips',
+        'clip_length': 'Clip Length',
+        'clip_length_help': 'Target clip length. OpenClip may adjust boundaries slightly to keep clips self-contained.',
         'add_titles': 'Add Video Top Banner Title',
         'generate_cover': 'Generate Cover',
         'process_video': '🎬 Process Video',
@@ -318,6 +321,8 @@ TRANSLATIONS = {
         'force_whisper': '强制使用本地 ASR 生成字幕',
         'generate_clips': '生成高光片段',
         'max_clips': '最大片段数',
+        'clip_length': '片段时长',
+        'clip_length_help': '目标片段时长。OpenClip 可能会稍微调整边界，以保证片段完整。',
         'add_titles': '添加视频上方横幅标题',
         'generate_cover': '生成封面',
         'process_video': '🎬 处理视频',
@@ -439,6 +444,7 @@ DEFAULT_DATA = {
     'force_whisper': False,
     'generate_clips': True,
     'max_clips': MAX_CLIPS,
+    'clip_length_preset': DEFAULT_CLIP_LENGTH_PRESET,
     'add_titles': False,
     'burn_subtitles': False,
     'subtitle_translation': None,
@@ -966,6 +972,18 @@ with st.sidebar:
     )
     data['max_clips'] = max_clips
 
+    clip_length_options = list(CLIP_DURATION_PRESETS.keys())
+    current_clip_length = normalize_clip_length_preset(data.get('clip_length_preset'))
+    clip_length_preset = st.selectbox(
+        t['clip_length'],
+        options=clip_length_options,
+        index=clip_length_options.index(current_clip_length),
+        format_func=lambda preset: CLIP_DURATION_PRESETS[preset].label,
+        help=t['clip_length_help'],
+        key=f"clip_length_preset_{st.session_state.reset_counter}"
+    )
+    data['clip_length_preset'] = clip_length_preset
+
     # User intent
     user_intent = st.text_input(
         t['user_intent'],
@@ -1272,6 +1290,7 @@ def process_video_worker(job, progress_callback):
         debug=False,
         custom_prompt_file=options.get('custom_prompt_file'),
         max_clips=options['max_clips'],
+        clip_length_preset=options.get('clip_length_preset', DEFAULT_CLIP_LENGTH_PRESET),
         enable_diarization=bool(options.get('speaker_references_dir')),
         speaker_references_dir=options.get('speaker_references_dir'),
         burn_subtitles=options.get('burn_subtitles', False),
@@ -1609,6 +1628,7 @@ if process_clicked:
             'language': language,
             'custom_prompt_file': custom_prompt_file,
             'max_clips': max_clips,
+            'clip_length_preset': clip_length_preset,
             'force_whisper': force_whisper,
             'cookie_mode': cookie_mode,
             'cookies_file': (cookies_file or None) if cookie_mode == 'file' else None,

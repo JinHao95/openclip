@@ -18,6 +18,7 @@ from typing import Any, Dict, List, Optional, Tuple
 from uuid import uuid4
 
 from core.config import WHISPER_MODEL
+from core.clip_duration import build_clip_duration_prompt_section, get_clip_duration_preference
 from core.transcript_generation_whisper import run_whisper_cli
 
 logger = logging.getLogger(__name__)
@@ -197,11 +198,13 @@ class AnalysisCoordinator:
         }
 
     def _build_analysis_plan(self, transcript_parts: List[str]) -> Dict[str, Any]:
+        duration_preference = self._duration_preference()
         return {
             "agentic_analysis_enabled": True,
             "mode": "engaging_moments",
             "language": getattr(self.analyzer, "language", "zh"),
             "user_intent": getattr(self.analyzer, "user_intent", None),
+            "clip_duration_preference": duration_preference.as_dict(),
             "target_clip_count": getattr(self.analyzer, "max_clips", 0),
             "pre_verify_pool_size": self._compute_pre_verify_pool_size(),
             "verification_mode": "llm_standalone_first",
@@ -1025,6 +1028,7 @@ Candidate:
 - Time Range: {candidate['timing']['start_time']} -> {candidate['timing']['end_time']}
 - Why engaging: {candidate.get('why_engaging', '')}
 - User intent: {user_intent or "none"}
+- Clip length preference: {self._duration_preference_text()}
 
 Actual clip transcript:
 {actual_clip_excerpt}
@@ -1086,6 +1090,8 @@ Use Context before and Context after only as reference material to determine:
 - whether the current clip starts too late
 - whether the current clip ends too early
 - whether expanding the boundaries could make it standalone
+
+{self._duration_guidance_prompt()}
 
 {mode_guidance}
 
@@ -1311,6 +1317,7 @@ Repair goal:
 - include the missing setup if the clip starts too late
 - include the missing ending if the clip ends too early
 - preserve the core moment while making the clip feel complete to a new viewer
+- keep the repaired clip within the selected duration bounds unless no standalone repair is possible
 - prefer the smallest boundary changes that create a satisfying mini-arc
 - choose an ending that lands the current point, not one that opens the next question, example, or sub-argument
 - prefer a true stopping point over the first merely grammatical clause
@@ -1328,6 +1335,8 @@ Important rules:
 Available context boundary anchors:
 - earliest Context before start_time: {context_before_start_time or "none"}
 - latest Context after end_time: {context_after_end_time or "none"}
+
+{self._duration_guidance_prompt()}
 
 Return ONLY valid JSON:
 {{
@@ -1623,7 +1632,23 @@ Context after:
             duration_seconds = int(max(0.0, end_seconds - start_seconds))
         except Exception:
             return False, 0
-        return 30 <= duration_seconds <= 240, duration_seconds
+        preference = self._duration_preference()
+        return preference.min_seconds <= duration_seconds <= preference.max_seconds, duration_seconds
+
+    def _duration_preference(self):
+        preference = getattr(self.analyzer, "clip_duration_preference", None)
+        return get_clip_duration_preference(getattr(preference, "preset", None))
+
+    def _duration_preference_text(self) -> str:
+        preference = self._duration_preference()
+        return (
+            f"{preference.label} "
+            f"(hard {preference.min_seconds}-{preference.max_seconds}s, "
+            f"ideal {preference.ideal_min_seconds}-{preference.ideal_max_seconds}s)"
+        )
+
+    def _duration_guidance_prompt(self) -> str:
+        return build_clip_duration_prompt_section(self._duration_preference().preset)
 
     def _has_excessive_overlap(
         self,

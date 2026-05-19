@@ -8,22 +8,19 @@ from core.subtitle_burner import SubtitlePreparationResult
 from video_orchestrator import VideoOrchestrator
 
 
-def test_skip_transcript_uses_existing_local_subtitle_for_single_part_video(tmp_path, monkeypatch):
+def _write_source_video_with_subtitle(tmp_path, subtitle_text=None):
     source_video = tmp_path / "input.mp4"
     source_video.write_bytes(b"fake-video")
     source_subtitle = tmp_path / "input.srt"
     source_subtitle.write_text(
-        "1\n00:00:00,000 --> 00:00:01,000\n你好\n",
+        subtitle_text
+        or "1\n00:00:00,000 --> 00:00:45,000\nThis clip contains enough setup to stand alone.",
         encoding="utf-8",
     )
+    return source_video, source_subtitle
 
-    orchestrator = VideoOrchestrator(
-        output_dir=str(tmp_path / "output"),
-        skip_analysis=True,
-        generate_clips=False,
-        generate_cover=False,
-    )
 
+def _patch_local_video_processing(monkeypatch, orchestrator, source_video, source_subtitle):
     async def fake_is_local_video_file(_source: str) -> bool:
         return True
 
@@ -40,6 +37,40 @@ def test_skip_transcript_uses_existing_local_subtitle_for_single_part_video(tmp_
 
     monkeypatch.setattr(orchestrator, "_is_local_video_file", fake_is_local_video_file)
     monkeypatch.setattr(orchestrator, "_process_local_video", fake_process_local_video)
+
+
+def _patch_existing_transcript_processing(monkeypatch, orchestrator, source_subtitle):
+    async def fake_process_transcripts(_subtitle_path, _video_path, _force_whisper, _progress_callback):
+        output_srt = (
+            Path(orchestrator.output_dir)
+            / "input"
+            / "splits"
+            / "input_part01.srt"
+        )
+        output_srt.parent.mkdir(parents=True, exist_ok=True)
+        output_srt.write_text(source_subtitle.read_text(encoding="utf-8"), encoding="utf-8")
+        return {
+            "source": "existing",
+            "transcript_parts": [str(output_srt)],
+        }
+
+    monkeypatch.setattr(orchestrator.transcript_processor, "process_transcripts", fake_process_transcripts)
+
+
+def test_skip_transcript_uses_existing_local_subtitle_for_single_part_video(tmp_path, monkeypatch):
+    source_video, source_subtitle = _write_source_video_with_subtitle(
+        tmp_path,
+        "1\n00:00:00,000 --> 00:00:01,000\n你好\n",
+    )
+
+    orchestrator = VideoOrchestrator(
+        output_dir=str(tmp_path / "output"),
+        skip_analysis=True,
+        generate_clips=False,
+        generate_cover=False,
+    )
+
+    _patch_local_video_processing(monkeypatch, orchestrator, source_video, source_subtitle)
 
     result = asyncio.run(
         orchestrator.process_video(
@@ -72,19 +103,7 @@ def test_custom_openai_requires_model_when_analysis_is_enabled(tmp_path):
 
 
 def test_agentic_analysis_routes_through_coordinator(tmp_path, monkeypatch):
-    source_video = tmp_path / "input.mp4"
-    source_video.write_bytes(b"fake-video")
-    source_subtitle = tmp_path / "input.srt"
-    source_subtitle.write_text(
-        "\n".join(
-            [
-                "1",
-                "00:00:00,000 --> 00:00:45,000",
-                "This clip contains enough setup to stand alone.",
-            ]
-        ),
-        encoding="utf-8",
-    )
+    source_video, source_subtitle = _write_source_video_with_subtitle(tmp_path)
 
     orchestrator = VideoOrchestrator(
         output_dir=str(tmp_path / "output"),
@@ -93,34 +112,6 @@ def test_agentic_analysis_routes_through_coordinator(tmp_path, monkeypatch):
         generate_clips=False,
         generate_cover=False,
     )
-
-    async def fake_is_local_video_file(_source: str) -> bool:
-        return True
-
-    async def fake_process_local_video(_video_path: str, _progress_callback):
-        return {
-            "video_path": str(source_video),
-            "video_info": {
-                "title": "input",
-                "duration": 60,
-                "uploader": "Local File",
-            },
-            "subtitle_path": str(source_subtitle),
-        }
-
-    async def fake_process_transcripts(_subtitle_path, _video_path, _force_whisper, _progress_callback):
-        output_srt = (
-            Path(orchestrator.output_dir)
-            / "input"
-            / "splits"
-            / "input_part01.srt"
-        )
-        output_srt.parent.mkdir(parents=True, exist_ok=True)
-        output_srt.write_text(source_subtitle.read_text(encoding="utf-8"), encoding="utf-8")
-        return {
-            "source": "existing",
-            "transcript_parts": [str(output_srt)],
-        }
 
     async def fake_run(transcript_parts, progress_callback=None):
         aggregated_file = Path(transcript_parts[0]).parent / "top_engaging_moments.json"
@@ -136,9 +127,8 @@ def test_agentic_analysis_routes_through_coordinator(tmp_path, monkeypatch):
             "agentic_analysis": True,
         }
 
-    monkeypatch.setattr(orchestrator, "_is_local_video_file", fake_is_local_video_file)
-    monkeypatch.setattr(orchestrator, "_process_local_video", fake_process_local_video)
-    monkeypatch.setattr(orchestrator.transcript_processor, "process_transcripts", fake_process_transcripts)
+    _patch_local_video_processing(monkeypatch, orchestrator, source_video, source_subtitle)
+    _patch_existing_transcript_processing(monkeypatch, orchestrator, source_subtitle)
     monkeypatch.setattr(orchestrator.analysis_coordinator, "run", fake_run)
 
     result = asyncio.run(
@@ -151,6 +141,46 @@ def test_agentic_analysis_routes_through_coordinator(tmp_path, monkeypatch):
 
     assert result.success is True
     assert result.engaging_moments_analysis["agentic_analysis"] is True
+
+
+def test_analyze_engaging_moments_uses_basic_strategy_without_agentic_analysis(tmp_path, monkeypatch):
+    orchestrator = VideoOrchestrator(
+        output_dir=str(tmp_path / "output"),
+        api_key="test-key",
+        generate_clips=False,
+        generate_cover=False,
+    )
+    calls = {"basic": 0, "agentic": 0}
+
+    async def fake_basic(_result, _progress_callback):
+        calls["basic"] += 1
+        return {"aggregated_file": "basic.json"}
+
+    async def fake_agentic(_result, _progress_callback):
+        calls["agentic"] += 1
+        return {"aggregated_file": "agentic.json"}
+
+    monkeypatch.setattr(orchestrator, "_run_basic_engaging_moments_analysis", fake_basic)
+    monkeypatch.setattr(orchestrator, "_run_agentic_engaging_moments_analysis", fake_agentic)
+
+    result = asyncio.run(orchestrator._analyze_engaging_moments(object(), None))
+
+    assert result == {"aggregated_file": "basic.json"}
+    assert calls == {"basic": 1, "agentic": 0}
+
+
+def test_orchestrator_passes_clip_length_preset_to_engaging_analyzer(tmp_path):
+    orchestrator = VideoOrchestrator(
+        output_dir=str(tmp_path / "output"),
+        api_key="test-key",
+        clip_length_preset="180_300",
+        generate_clips=False,
+        generate_cover=False,
+    )
+
+    assert orchestrator.clip_length_preset == "180_300"
+    assert orchestrator.engaging_moments_analyzer.clip_duration_preference.preset == "180_300"
+    assert orchestrator.engaging_moments_analyzer.clip_duration_preference.max_seconds == 300
 
 
 def test_process_video_emits_editor_manifest(tmp_path, monkeypatch):

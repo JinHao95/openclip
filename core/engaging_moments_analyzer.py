@@ -13,6 +13,10 @@ import re
 
 from core.llm.qwen_api_client import QwenAPIClient, QwenMessage
 from core.config import LLM_CONFIG, MAX_CLIPS
+from core.clip_duration import (
+    build_clip_duration_prompt_section,
+    get_clip_duration_preference,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -20,7 +24,20 @@ logger = logging.getLogger(__name__)
 class EngagingMomentsAnalyzer:
     """Analyzes video transcripts to identify engaging moments using LLM APIs"""
     
-    def __init__(self, api_key: Optional[str] = None, provider: str = "qwen", use_background: bool = False, language: str = "zh", debug: bool = False, custom_prompt_file: Optional[str] = None, max_clips: int = MAX_CLIPS, user_intent: Optional[str] = None, model: Optional[str] = None, base_url: Optional[str] = None):
+    def __init__(
+        self,
+        api_key: Optional[str] = None,
+        provider: str = "qwen",
+        use_background: bool = False,
+        language: str = "zh",
+        debug: bool = False,
+        custom_prompt_file: Optional[str] = None,
+        max_clips: int = MAX_CLIPS,
+        user_intent: Optional[str] = None,
+        model: Optional[str] = None,
+        base_url: Optional[str] = None,
+        clip_length_preset: Optional[str] = None,
+    ):
         """
         Initialize the analyzer
 
@@ -36,6 +53,7 @@ class EngagingMomentsAnalyzer:
         self.custom_prompt_file = custom_prompt_file
         self.max_clips = max_clips
         self.user_intent = user_intent.strip() if user_intent else None
+        self.clip_duration_preference = get_clip_duration_preference(clip_length_preset)
         self.provider = provider.lower()
         self.prompts_dir = Path(__file__).parent.parent / "prompts"
         self.use_background = use_background
@@ -286,6 +304,8 @@ class EngagingMomentsAnalyzer:
             prompt_parts.append("\n\n")
 
         prompt_parts.append(prompt_template)
+        prompt_parts.append("\n\n")
+        prompt_parts.append(build_clip_duration_prompt_section(self.clip_duration_preference.preset))
         if self.user_intent:
             prompt_parts.append(f"\n\n## User Focus\n\nThe user is specifically looking for: {self.user_intent}\nPrioritize moments related to this when selecting and ranking clips.")
         prompt_parts.append(f"\n\n## Transcript Data for {part_name}\n\n")
@@ -325,6 +345,12 @@ class EngagingMomentsAnalyzer:
             prompt_parts.append("\n\n")
 
         prompt_parts.append(prompt_template.replace("{max_clips}", str(self.max_clips)))
+        prompt_parts.append("\n\n")
+        prompt_parts.append(build_clip_duration_prompt_section(self.clip_duration_preference.preset))
+        prompt_parts.append(
+            "\n\nWhen ranking final clips, use duration fit as a preference after content quality, "
+            "standalone clarity, and engagement strength."
+        )
         if self.user_intent:
             prompt_parts.append(f"\n\n## User Focus\n\nThe user is specifically looking for: {self.user_intent}\nPrioritize moments related to this when selecting and ranking the final clips.")
         prompt_parts.append(f"\n\n## All Engaging Moments Data\n\n")
@@ -565,14 +591,16 @@ Please fix the JSON and return ONLY the valid JSON, no explanations:
             end_seconds = self.time_to_seconds(end_time)
             duration = end_seconds - start_seconds
             
-            # Check duration constraints (30 seconds to 4 minutes)
-            if duration < 30 or duration > 240:
+            min_seconds = self.clip_duration_preference.min_seconds
+            max_seconds = self.clip_duration_preference.max_seconds
+            if duration < min_seconds or duration > max_seconds:
                 logger.warning(
                     "Invalid duration: "
                     f"title={moment.get('title', '<untitled>')!r}, "
                     f"start_time={start_time!r} ({start_seconds:.3f}s), "
                     f"end_time={end_time!r} ({end_seconds:.3f}s), "
-                    f"duration={duration:.3f}s"
+                    f"duration={duration:.3f}s, "
+                    f"expected_range={min_seconds}-{max_seconds}s"
                 )
                 return False
             

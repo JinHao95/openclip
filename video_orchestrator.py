@@ -39,6 +39,7 @@ from core.video_utils import (
     insights_to_clip_format,
 )
 from core.config import DEFAULT_LLM_PROVIDER, DEFAULT_TITLE_STYLE, API_KEY_ENV_VARS, MAX_DURATION_MINUTES, WHISPER_MODEL, MAX_CLIPS, SKIP_DOWNLOAD, SKIP_TRANSCRIPT, SUPPORTED_LLM_PROVIDERS, SUBTITLE_TRANSLATION_MAX_WORKERS
+from core.clip_duration import CLIP_DURATION_PRESETS, DEFAULT_CLIP_LENGTH_PRESET, normalize_clip_length_preset
 
 # Set up logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -89,6 +90,7 @@ class VideoOrchestrator:
                 subtitle_translation_max_workers: int = SUBTITLE_TRANSLATION_MAX_WORKERS,
                 user_intent: Optional[str] = None,
                 agentic_analysis: bool = False,
+                clip_length_preset: str = DEFAULT_CLIP_LENGTH_PRESET,
                 normalize_boundaries: bool = True):
         """
         Initialize the video orchestrator
@@ -130,6 +132,7 @@ class VideoOrchestrator:
         self.use_background = use_background
         self.mode = mode
         self.agentic_analysis = agentic_analysis
+        self.clip_length_preset = normalize_clip_length_preset(clip_length_preset)
         self.title_font_size = TITLE_FONT_SIZES.get(title_font_size, 40)
         self.subtitle_style_preset = subtitle_style_preset
         self.subtitle_style_font_size = subtitle_style_font_size
@@ -189,6 +192,7 @@ class VideoOrchestrator:
                         custom_prompt_file=custom_prompt_file,
                         max_clips=max_clips,
                         user_intent=user_intent,
+                        clip_length_preset=self.clip_length_preset,
                     )
                     if self.agentic_analysis:
                         self.analysis_coordinator = AnalysisCoordinator(
@@ -439,12 +443,8 @@ class VideoOrchestrator:
                     logger.info("💡 Step 4: Extracting insights...")
                     engaging_result = await self._analyze_insights(result, progress_callback)
                 else:
-                    if self.agentic_analysis and self.analysis_coordinator:
-                        logger.info("🧠 Step 4: Running agentic engaging moments analysis...")
-                        engaging_result = await self._analyze_engaging_moments_agentic(result, progress_callback)
-                    else:
-                        logger.info("🧠 Step 4: Analyzing engaging moments...")
-                        engaging_result = await self._analyze_engaging_moments(result, progress_callback)
+                    logger.info("🧠 Step 4: Analyzing engaging moments...")
+                    engaging_result = await self._analyze_engaging_moments(result, progress_callback)
                 result.engaging_moments_analysis = engaging_result
             elif self.skip_analysis:
                 logger.info("🧠 Step 4: Skipping analysis (--skip-analysis)")
@@ -812,6 +812,21 @@ class VideoOrchestrator:
     async def _analyze_engaging_moments(self,
                                       result: ProcessingResult,
                                       progress_callback: Optional[Callable[[str, float], None]]) -> Dict[str, Any]:
+        """Analyze engaging moments through the configured strategy."""
+        if self.agentic_analysis and self.analysis_coordinator:
+            return await self._run_agentic_engaging_moments_analysis(
+                result,
+                progress_callback,
+            )
+
+        return await self._run_basic_engaging_moments_analysis(
+            result,
+            progress_callback,
+        )
+
+    async def _run_basic_engaging_moments_analysis(self,
+                                      result: ProcessingResult,
+                                      progress_callback: Optional[Callable[[str, float], None]]) -> Dict[str, Any]:
         """
         Analyze engaging moments from transcripts
         
@@ -885,7 +900,7 @@ class VideoOrchestrator:
                 'total_parts_analyzed': 0
             }
 
-    async def _analyze_engaging_moments_agentic(self,
+    async def _run_agentic_engaging_moments_analysis(self,
                                                 result: ProcessingResult,
                                                 progress_callback: Optional[Callable[[str, float], None]]) -> Dict[str, Any]:
         """Analyze engaging moments using the optional bounded coordinator loop."""
@@ -1366,6 +1381,9 @@ Note: Set the API key environment variable for your selected provider when requi
                             'and ranking toward this focus.')
     parser.add_argument('--deep-optimize', dest='agentic_analysis', action='store_true',
                        help='Run the deeper clip review and refinement workflow for better standalone clip quality')
+    parser.add_argument('--clip-length', default=DEFAULT_CLIP_LENGTH_PRESET,
+                       choices=list(CLIP_DURATION_PRESETS.keys()),
+                       help='Target clip length preset for engaging-moments mode (default: auto)')
     parser.add_argument('--normalize-boundaries', dest='normalize_boundaries', action='store_true',
                        help='Normalize both clip start and end times to nearby subtitle boundaries')
     parser.add_argument('--no-normalize-boundaries', dest='normalize_boundaries', action='store_false',
@@ -1430,6 +1448,7 @@ Note: Set the API key environment variable for your selected provider when requi
         subtitle_translation_max_workers=args.subtitle_translation_workers,
         user_intent=args.user_intent,
         agentic_analysis=args.agentic_analysis,
+        clip_length_preset=args.clip_length,
         normalize_boundaries=args.normalize_boundaries,
     )
     
