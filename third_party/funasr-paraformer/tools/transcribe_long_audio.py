@@ -401,14 +401,6 @@ def transcribe_one(
     language: str,
     language_detection: dict[str, Any],
 ) -> dict[str, Any]:
-    main_result = model.generate(
-        input=str(normalized_audio),
-        batch_size_s=args.batch_size_s,
-        batch_size_threshold_s=args.batch_size_threshold_s,
-        return_raw_text=True,
-        disable_pbar=args.disable_pbar,
-    )[0]
-
     vad_segments = run_vad(model, normalized_audio, args.disable_pbar)
     samples = load_audio_samples(normalized_audio)
     segment_audio = slice_segments(samples, vad_segments)
@@ -437,6 +429,9 @@ def transcribe_one(
             }
         )
 
+    full_text = "\n".join(text for text in segment_texts if text).strip()
+    raw_full_text = "\n".join(text for text in raw_segment_texts if text).strip()
+
     result = {
         "input_file": str(input_file),
         "normalized_audio": str(normalized_audio),
@@ -449,8 +444,8 @@ def transcribe_one(
             "vad": str(Path(model.vad_kwargs["model_path"]).resolve()),
             "punc": str(Path(model.punc_kwargs["model_path"]).resolve()),
         },
-        "text": main_result.get("text", "").strip(),
-        "raw_text": main_result.get("raw_text", "").strip(),
+        "text": full_text,
+        "raw_text": raw_full_text,
         "vad_segment_count": len(vad_segments),
         "segments": segments,
     }
