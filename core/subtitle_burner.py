@@ -36,6 +36,7 @@ from PIL import Image, ImageDraw
 
 from core.config import (
     API_KEY_ENV_VARS,
+    LLM_CONFIG,
     SUBTITLE_TRANSLATION_LAUNCH_STAGGER_SECONDS,
     SUBTITLE_TRANSLATION_MAX_WORKERS,
 )
@@ -220,7 +221,12 @@ class SubtitleBurner:
                 self.client = MiniMaxAPIClient(api_key=api_key, base_url=base_url)
             elif provider == "doubao":
                 from core.llm.custom_openai_api_client import CustomOpenAIAPIClient
-                self.client = CustomOpenAIAPIClient(api_key=api_key, base_url=base_url)
+                doubao_cfg = LLM_CONFIG["doubao"]
+                self.client = CustomOpenAIAPIClient(
+                    api_key=api_key or os.getenv(API_KEY_ENV_VARS["doubao"]),
+                    base_url=base_url or doubao_cfg["base_url"],
+                    model=model or doubao_cfg["default_model"],
+                )
             elif provider == "custom_openai":
                 from core.llm.custom_openai_api_client import CustomOpenAIAPIClient
                 self.client = CustomOpenAIAPIClient(api_key=api_key, base_url=base_url)

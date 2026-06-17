@@ -6,12 +6,13 @@ Extracts intellectual insights from thought-leader video transcripts using LLM A
 
 import json
 import logging
+import os
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 import re
 
-from core.config import LLM_CONFIG, MAX_CLIPS
+from core.config import LLM_CONFIG, MAX_CLIPS, API_KEY_ENV_VARS, SUPPORTED_LLM_PROVIDERS
 
 logger = logging.getLogger(__name__)
 
@@ -61,7 +62,12 @@ class InsightsAnalyzer:
             self.llm_client = MiniMaxAPIClient(api_key, base_url=self.base_url)
         elif self.provider == "doubao":
             from core.llm.custom_openai_api_client import CustomOpenAIAPIClient
-            self.llm_client = CustomOpenAIAPIClient(api_key, base_url=self.base_url)
+            doubao_cfg = LLM_CONFIG["doubao"]
+            self.llm_client = CustomOpenAIAPIClient(
+                api_key or os.getenv(API_KEY_ENV_VARS["doubao"]),
+                base_url=self.base_url or doubao_cfg["base_url"],
+                model=self.model or doubao_cfg["default_model"],
+            )
         elif self.provider == "custom_openai":
             from core.llm.custom_openai_api_client import CustomOpenAIAPIClient
             self.llm_client = CustomOpenAIAPIClient(api_key, base_url=self.base_url)

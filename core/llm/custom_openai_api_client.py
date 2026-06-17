@@ -26,7 +26,7 @@ class CustomOpenAIMessage:
 class CustomOpenAIAPIClient:
     """Client for arbitrary OpenAI-compatible chat completion endpoints."""
 
-    def __init__(self, api_key: Optional[str] = None, base_url: Optional[str] = None):
+    def __init__(self, api_key: Optional[str] = None, base_url: Optional[str] = None, model: Optional[str] = None):
         self.api_key = api_key or os.getenv(API_KEY_ENV_VARS["custom_openai"])
         resolved_base_url = (
             base_url
@@ -35,7 +35,8 @@ class CustomOpenAIAPIClient:
         )
         self.base_url = _normalize_chat_completions_url(resolved_base_url)
         self.default_model = (
-            os.getenv("CUSTOM_OPENAI_MODEL")
+            model
+            or os.getenv("CUSTOM_OPENAI_MODEL")
             or LLM_CONFIG["custom_openai"]["default_model"]
         )
 

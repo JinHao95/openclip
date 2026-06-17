@@ -6,13 +6,14 @@ Identifies engaging moments from video transcripts using LLM APIs
 
 import json
 import logging
+import os
 from pathlib import Path
 from typing import List, Dict, Any, Optional
 from datetime import datetime
 import re
 
 from core.llm.qwen_api_client import QwenAPIClient, QwenMessage
-from core.config import LLM_CONFIG, MAX_CLIPS
+from core.config import LLM_CONFIG, MAX_CLIPS, API_KEY_ENV_VARS, SUPPORTED_LLM_PROVIDERS
 from core.clip_duration import (
     build_clip_duration_prompt_section,
     get_clip_duration_preference,
@@ -85,7 +86,12 @@ class EngagingMomentsAnalyzer:
             self.llm_client = MiniMaxAPIClient(api_key, base_url=self.base_url)
         elif self.provider == "doubao":
             from core.llm.custom_openai_api_client import CustomOpenAIAPIClient
-            self.llm_client = CustomOpenAIAPIClient(api_key, base_url=self.base_url)
+            doubao_cfg = LLM_CONFIG["doubao"]
+            self.llm_client = CustomOpenAIAPIClient(
+                api_key or os.getenv(API_KEY_ENV_VARS["doubao"]),
+                base_url=self.base_url or doubao_cfg["base_url"],
+                model=self.model or doubao_cfg["default_model"],
+            )
         elif self.provider == "custom_openai":
             from core.llm.custom_openai_api_client import CustomOpenAIAPIClient
             self.llm_client = CustomOpenAIAPIClient(api_key, base_url=self.base_url)
