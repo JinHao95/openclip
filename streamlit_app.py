@@ -201,6 +201,9 @@ TRANSLATIONS = {
         'override_analysis_prompt_help': 'Replace the default analysis prompt entirely. For developers who want full control over how the LLM analyzes content.',
         'use_custom_prompt': 'Use Custom Highlight Analysis Prompt',
         'force_whisper': 'Force Local ASR Subtitles',
+        'force_whisper_help': 'Ignore downloaded subtitles and generate a fresh local transcript.',
+        'long_video_acceleration': '⚡ Long Video Acceleration',
+        'long_video_acceleration_help': 'Performs audio energy analysis first to identify exciting moments (commentary spikes, crowd roars), then only transcribes those segments. Best for sports, live events, and content with clear emotional peaks.',
         'generate_clips': 'Generate Clips',
         'max_clips': 'Max Clips',
         'clip_length': 'Clip Length',
@@ -319,6 +322,8 @@ TRANSLATIONS = {
         'override_analysis_prompt_help': '完全替换默认分析提示词。适合想完全控制LLM分析方式的开发者。',
         'use_custom_prompt': '使用自定义高光分析提示词',
         'force_whisper': '强制使用本地 ASR 生成字幕',
+        'long_video_acceleration': '⚡ 长视频加速',
+        'long_video_acceleration_help': '先进行音频能量分析，识别解说激动/观众欢呼等高能量片段，仅对候选片段做语音转写。适合体育赛事、直播回放等有明显情绪波动的视频。',
         'generate_clips': '生成高光片段',
         'max_clips': '最大片段数',
         'clip_length': '片段时长',
@@ -442,6 +447,7 @@ DEFAULT_DATA = {
     'use_background': False,
     'use_custom_prompt': False,
     'force_whisper': False,
+    'long_video_acceleration': False,
     'generate_clips': True,
     'max_clips': MAX_CLIPS,
     'clip_length_preset': DEFAULT_CLIP_LENGTH_PRESET,
@@ -1163,6 +1169,14 @@ with st.sidebar:
         )
         data['force_whisper'] = force_whisper
 
+        long_video_acceleration = st.checkbox(
+            t['long_video_acceleration'],
+            value=data.get('long_video_acceleration', False),
+            help=t['long_video_acceleration_help'],
+            key=f"long_video_acceleration_{st.session_state.reset_counter}"
+        )
+        data['long_video_acceleration'] = long_video_acceleration
+
         use_custom_prompt = st.checkbox(
             t['override_analysis_prompt'],
             value=data.get('use_custom_prompt', False),
@@ -1304,6 +1318,7 @@ def process_video_worker(job, progress_callback):
         user_intent=options.get('user_intent') or None,
         agentic_analysis=options.get('agentic_analysis', False),
         normalize_boundaries=options.get('normalize_boundaries', True),
+        long_video_acceleration=options.get('long_video_acceleration', False),
     )
     
     result = asyncio.run(orchestrator.process_video(
@@ -1630,6 +1645,7 @@ if process_clicked:
             'max_clips': max_clips,
             'clip_length_preset': clip_length_preset,
             'force_whisper': force_whisper,
+            'long_video_acceleration': long_video_acceleration,
             'cookie_mode': cookie_mode,
             'cookies_file': (cookies_file or None) if cookie_mode == 'file' else None,
             'speaker_references_dir': speaker_references_dir or None,

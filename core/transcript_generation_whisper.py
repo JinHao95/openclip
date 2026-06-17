@@ -270,6 +270,138 @@ class TranscriptProcessor:
                     'transcript_parts': [] if isinstance(video_files, str) else self._get_existing_transcript_parts(video_files)
                 }
 
+    async def process_transcripts_for_segments(
+        self,
+        segments: List[Dict],
+        video_path: str,
+        output_dir: str,
+        progress_callback: Optional[Callable[[str, float], None]] = None,
+    ) -> Dict[str, Any]:
+        """Transcribe only specified time segments, output a merged SRT."""
+        import tempfile
+
+        video_path = str(video_path)
+        output_dir = Path(output_dir)
+        output_dir.mkdir(parents=True, exist_ok=True)
+        video_stem = Path(video_path).stem
+
+        all_srt_entries = []
+        total_segments = len(segments)
+
+        for i, seg in enumerate(segments):
+            start, end = seg["start"], seg["end"]
+            duration = end - start
+
+            if progress_callback:
+                pct = 35 + (i / total_segments) * 13
+                progress_callback(
+                    f"Transcribing segment {i+1}/{total_segments} "
+                    f"({start:.0f}s-{end:.0f}s)...",
+                    pct,
+                )
+
+            with tempfile.TemporaryDirectory() as tmpdir:
+                seg_audio = Path(tmpdir) / f"seg_{i:03d}.wav"
+                cmd = [
+                    "ffmpeg", "-y", "-ss", str(start), "-t", str(duration),
+                    "-i", video_path, "-vn", "-acodec", "pcm_s16le",
+                    "-ar", "16000", "-ac", "1", str(seg_audio),
+                ]
+                subprocess.run(cmd, capture_output=True, check=True)
+
+                detected_language = self._detect_transcript_language(str(seg_audio))
+                backend = select_transcript_backend(
+                    detected_language=detected_language,
+                    paraformer_available=self.paraformer_processor.is_available(),
+                    use_whisperx=self.use_whisperx,
+                )
+
+                srt_path = None
+                if backend == "paraformer":
+                    try:
+                        srt_path, _ = self.paraformer_processor.transcribe_chinese_to_srt(
+                            str(seg_audio), Path(tmpdir)
+                        )
+                    except Exception:
+                        backend = "whisper"
+
+                if not srt_path:
+                    run_whisper_cli(
+                        str(seg_audio),
+                        model_name=self.whisper_model,
+                        language=detected_language,
+                        output_format="srt",
+                        output_dir=tmpdir,
+                    )
+                    srt_path = str(Path(tmpdir) / f"{seg_audio.stem}.srt")
+
+                if srt_path and Path(srt_path).exists():
+                    entries = self._parse_and_offset_srt(srt_path, start)
+                    all_srt_entries.extend(entries)
+                    logger.info(
+                        f"✅ Segment {i+1} ({start:.0f}-{end:.0f}s): "
+                        f"{len(entries)} subtitle entries via {backend}"
+                    )
+
+        merged_srt_path = str(output_dir / f"{video_stem}.srt")
+        self._write_srt(all_srt_entries, merged_srt_path)
+        logger.info(f"📝 Merged SRT: {len(all_srt_entries)} entries → {merged_srt_path}")
+
+        return {
+            "source": "audio_energy_segments",
+            "transcript_path": merged_srt_path,
+            "transcript_parts": [merged_srt_path],
+        }
+
+    @staticmethod
+    def _parse_and_offset_srt(srt_path: str, offset_seconds: float) -> List[Dict]:
+        """Parse SRT and shift all timestamps by offset_seconds."""
+        entries = []
+        with open(srt_path, "r", encoding="utf-8") as f:
+            content = f.read().strip()
+        if not content:
+            return entries
+
+        time_pattern = re.compile(
+            r"(\d{2}):(\d{2}):(\d{2}),(\d{3})"
+        )
+
+        def shift_time(match) -> str:
+            h, m, s, ms = int(match.group(1)), int(match.group(2)), int(match.group(3)), int(match.group(4))
+            total_ms = (h * 3600 + m * 60 + s) * 1000 + ms + int(offset_seconds * 1000)
+            total_ms = max(0, total_ms)
+            nh = total_ms // 3600000
+            nm = (total_ms % 3600000) // 60000
+            ns = (total_ms % 60000) // 1000
+            nms = total_ms % 1000
+            return f"{nh:02d}:{nm:02d}:{ns:02d},{nms:03d}"
+
+        for block in content.split("\n\n"):
+            lines = block.strip().split("\n")
+            if len(lines) >= 3:
+                timing_line = time_pattern.sub(shift_time, lines[1])
+                text = " ".join(lines[2:])
+                timing_match = re.match(
+                    r"(\d{2}:\d{2}:\d{2},\d{3}) --> (\d{2}:\d{2}:\d{2},\d{3})",
+                    timing_line,
+                )
+                if timing_match:
+                    entries.append({
+                        "start": timing_match.group(1),
+                        "end": timing_match.group(2),
+                        "text": text,
+                    })
+        return entries
+
+    @staticmethod
+    def _write_srt(entries: List[Dict], output_path: str):
+        """Write subtitle entries to SRT format."""
+        with open(output_path, "w", encoding="utf-8") as f:
+            for i, entry in enumerate(entries, 1):
+                f.write(f"{i}\n")
+                f.write(f"{entry['start']} --> {entry['end']}\n")
+                f.write(f"{entry['text']}\n\n")
+
     def _get_language_detector(self):
         if self._language_detector is None:
             self._language_detector = whisper.load_model(self.language_detection_model)

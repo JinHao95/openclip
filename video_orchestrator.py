@@ -91,7 +91,8 @@ class VideoOrchestrator:
                 user_intent: Optional[str] = None,
                 agentic_analysis: bool = False,
                 clip_length_preset: str = DEFAULT_CLIP_LENGTH_PRESET,
-                normalize_boundaries: bool = True):
+                normalize_boundaries: bool = True,
+                long_video_acceleration: bool = False):
         """
         Initialize the video orchestrator
 
@@ -160,7 +161,9 @@ class VideoOrchestrator:
             speaker_references_dir=speaker_references_dir,
         )
         self.download_processor = DownloadProcessor(self.downloader)
-        
+
+        self.long_video_acceleration = long_video_acceleration
+
         # Initialize the appropriate analyzer based on mode
         self.skip_analysis = skip_analysis
         self.engaging_moments_analyzer = None
@@ -418,6 +421,47 @@ class VideoOrchestrator:
                         result.transcript_parts = existing_transcript['transcript_parts']
                 else:
                     raise Exception("No existing transcript found. Remove --skip-transcript to generate transcripts.")
+            elif self.long_video_acceleration:
+                logger.info("🔊 Step 3: Audio energy analysis + targeted transcription...")
+                if progress_callback:
+                    progress_callback("Analyzing audio energy levels...", 30)
+
+                from core.audio_energy_analyzer import AudioEnergyAnalyzer
+                energy_analyzer = AudioEnergyAnalyzer()
+                source_video = result.video_path if not result.was_split else result.video_parts[0]
+                energy_result = energy_analyzer.analyze(source_video)
+
+                if energy_result.fell_back_to_full:
+                    logger.info("📝 Audio energy too uniform, falling back to full ASR")
+                    if progress_callback:
+                        progress_callback("Generating full transcript...", 35)
+                    transcript_result = await self.transcript_processor.process_transcripts(
+                        subtitle_path,
+                        result.video_path if not result.was_split else result.video_parts,
+                        force_whisper,
+                        progress_callback
+                    )
+                else:
+                    logger.info(
+                        f"🔊 Found {len(energy_result.segments)} high-energy segments "
+                        f"({energy_result.coverage_ratio:.0%} coverage), transcribing only those"
+                    )
+                    if progress_callback:
+                        progress_callback("Transcribing high-energy segments...", 35)
+                    splits_dir = video_root_dir / "splits"
+                    splits_dir.mkdir(parents=True, exist_ok=True)
+                    transcript_result = await self.transcript_processor.process_transcripts_for_segments(
+                        energy_result.segments,
+                        source_video,
+                        str(splits_dir),
+                        progress_callback,
+                    )
+
+                result.transcript_source = transcript_result['source']
+                if transcript_result.get('transcript_parts'):
+                    result.transcript_parts = transcript_result['transcript_parts']
+                if transcript_result.get('transcript_path'):
+                    result.transcript_path = transcript_result['transcript_path']
             else:
                 logger.info("📝 Step 3: Processing transcripts...")
                 transcript_result = await self.transcript_processor.process_transcripts(
