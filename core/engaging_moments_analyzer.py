@@ -370,49 +370,86 @@ class EngagingMomentsAnalyzer:
 
     async def analyze_part_for_engaging_moments(self, srt_path: str, part_name: str) -> Dict[str, Any]:
         """
-        Analyze a single video part for engaging moments
-
-        Args:
-            srt_path: Path to SRT file
-            part_name: Name of the video part (e.g., "part01")
-
-        Returns:
-            Dictionary with engaging moments analysis
+        Analyze a single video part for engaging moments.
+        When the transcript has more than CHUNK_SIZE entries, split into chunks
+        and analyze each independently, then merge results.
         """
+        CHUNK_SIZE = 10
+
         logger.info(f"🔍 Analyzing {part_name} for engaging moments...")
 
-        # Parse SRT file
         entries = self.parse_srt_file(srt_path)
         if not entries:
             logger.warning(f"No entries found in {srt_path}")
             return self._create_empty_result(part_name)
 
-        # Build the analysis prompt
-        analysis_prompt = self.build_part_analysis_prompt(srt_path, part_name)
+        if len(entries) <= CHUNK_SIZE:
+            return await self._analyze_entries_chunk(entries, part_name, srt_path)
 
-        # Export debug prompt if enabled
-        self._export_debug_prompt(analysis_prompt, "part_analysis", part_name)
-        
+        # Split into chunks and analyze each
+        chunks = [entries[i:i+CHUNK_SIZE] for i in range(0, len(entries), CHUNK_SIZE)]
+        logger.info(f"📦 Splitting {len(entries)} entries into {len(chunks)} chunks for parallel analysis")
+
+        import asyncio
+        tasks = [
+            self._analyze_entries_chunk(chunk, f"{part_name}_chunk{i+1:02d}", srt_path)
+            for i, chunk in enumerate(chunks)
+        ]
+        chunk_results = await asyncio.gather(*tasks)
+
+        # Merge all moments from chunks
+        all_moments = []
+        detected_type = "entertainment"
+        for cr in chunk_results:
+            if cr.get('engaging_moments'):
+                all_moments.extend(cr['engaging_moments'])
+            if cr.get('detected_content_type'):
+                detected_type = cr['detected_content_type']
+
+        logger.info(f"🔗 Merged {len(all_moments)} moments from {len(chunks)} chunks")
+
+        return {
+            "video_part": part_name,
+            "detected_content_type": detected_type,
+            "engaging_moments": all_moments,
+            "total_moments": len(all_moments),
+            "analysis_timestamp": datetime.now().isoformat(),
+        }
+
+    async def _analyze_entries_chunk(self, entries: List[Dict[str, Any]], chunk_name: str, srt_path: str) -> Dict[str, Any]:
+        """Analyze a single chunk of entries."""
+        transcript_context = self.create_transcript_context(entries)
+        prompt_template = self.load_prompt_template("engaging_moments_part_requirement")
+
+        prompt_parts = []
+        if self.use_background and self.background_content:
+            prompt_parts.append("## Additional Background Information\n\n")
+            prompt_parts.append(self.background_content)
+            prompt_parts.append("\n\n")
+
+        prompt_parts.append(prompt_template)
+        prompt_parts.append("\n\n")
+        prompt_parts.append(build_clip_duration_prompt_section(self.clip_duration_preference.preset))
+        if self.user_intent:
+            prompt_parts.append(f"\n\n## User Focus\n\nThe user is specifically looking for: {self.user_intent}\nPrioritize moments related to this when selecting and ranking clips.")
+        prompt_parts.append(f"\n\n## Transcript Data for {chunk_name}\n\n")
+        prompt_parts.append(transcript_context)
+        prompt_parts.append("\n\nPlease analyze this transcript and identify engaging moments following the requirements above.")
+
+        analysis_prompt = "".join(prompt_parts)
+        self._export_debug_prompt(analysis_prompt, "part_analysis", chunk_name)
+
         try:
-            # Call LLM API
             response = self.llm_client.simple_chat(analysis_prompt, model=self.model)
-            
-            # Try to parse JSON response with improved extraction
             try:
-                result = self._extract_and_parse_json(response, part_name, entries)
-                
+                result = self._extract_and_parse_json(response, chunk_name, entries)
             except json.JSONDecodeError as e:
-                logger.error(f"Failed to parse JSON response: {e}")
-                logger.error(f"Response length: {len(response)} characters")
-                logger.error(f"Response preview: {response[:500]}...")
-                if len(response) > 500:
-                    logger.error(f"Response ending: ...{response[-200:]}")
-                result = self._create_empty_result(part_name)
-                
+                logger.error(f"Failed to parse JSON for {chunk_name}: {e}")
+                result = self._create_empty_result(chunk_name)
         except Exception as e:
-            logger.error(f"Error calling LLM API ({self.provider}): {e}")
-            result = self._create_empty_result(part_name)
-        
+            logger.error(f"Error calling LLM API for {chunk_name}: {e}")
+            result = self._create_empty_result(chunk_name)
+
         return result
     
     def _extract_and_parse_json(self, response: str, part_name: str, entries: List[Dict[str, Any]]) -> Dict[str, Any]:

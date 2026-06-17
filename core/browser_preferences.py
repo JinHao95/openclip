@@ -88,7 +88,6 @@ def _sanitize_preference_value(key: str, value: Any, default_data: Mapping[str, 
     return copy.deepcopy(value)
 
 EXCLUDED_FIELDS = {
-    "api_key",
     "video_source",
     "cookies_file",
     "custom_prompt_file",

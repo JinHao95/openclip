@@ -178,7 +178,8 @@ class ClipGenerator:
                         'original_time_range': f"{start_time} - {end_time}",
                         'normalization_details': normalization_details,
                         'engagement_level': moment['engagement_details'].get('engagement_level', 'N/A'),
-                        'why_engaging': moment['why_engaging']
+                        'why_engaging': moment['why_engaging'],
+                        'tags': moment.get('tags', []),
                     })
                     logger.info(f"✓ Saved: {output_filename}")
                     if subtitle_generated:

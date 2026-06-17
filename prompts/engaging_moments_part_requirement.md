@@ -18,6 +18,7 @@ First, identify the content type of this video from these categories:
 | **experience** | Life stories, personal anecdotes | Relatable moments, emotional resonance, personal revelations |
 | **business** | Professional advice, market analysis | Value propositions, expert insights, ROI signals |
 | **content_review** | Movie/game reviews, analyses | Unique opinions, surprising takes, comparisons |
+| **sports** | Match commentary, game highlights, athletic events | Goals, fouls, saves, crowd reactions, pivotal plays, replays |
 
 ## General Engagement Criteria (Always Apply)
 
@@ -88,7 +89,21 @@ In addition to the general criteria above, apply these type-specific nuances bas
 - Look for entertaining critiques and comparisons
 - Identify surprising revelations about reviewed content
 
+### For SPORTS:
+- Capture pivotal game moments (goals, penalties, key saves, red/yellow cards)
+- Prioritize unexpected turns (comeback, upset, last-minute equalizer)
+- Include crowd/commentary energy peaks as confirmation of importance
+- Look for star player individual moments and celebrations
+- Ensure each clip captures the full action arc (buildup → event → reaction)
+- Standalone: the clip should show a complete play sequence
+
 ## Requirements
+
+### Quantity Guidelines (Important)
+- For sports content: identify ALL moments with notable action (shots, saves, goals, fouls, celebrations, tactical plays)
+- Do NOT be overly selective — include medium-engagement moments too
+- The aggregation step will handle final selection, so prefer more candidates over fewer
+- If the transcript contains action, always return at least 1 moment
 
 ### Duration Constraints (Must Follow)
 - Follow the runtime **Clip Length Preference** section injected by OpenClip
@@ -213,7 +228,7 @@ Return your response as a JSON object following this exact structure:
 
 ### Top-Level Required Fields:
 - **video_part**: Identifier for this video segment (e.g., "part01")
-- **detected_content_type**: The content type category detected from the video (entertainment/knowledge/speech/opinion/experience/business/content_review)
+- **detected_content_type**: The content type category detected from the video (entertainment/knowledge/speech/opinion/experience/business/content_review/sports)
 
 ### Required Fields for Each Moment:
 - **title**: Compelling title without emojis (follow language-specific guidelines)
@@ -231,7 +246,10 @@ Return your response as a JSON object following this exact structure:
 - **"low"**: Mild interest moments that still meet minimum engagement criteria
 
 ### Approved Tags:
-["co-hosting", "interactive", "humorous", "live-chemistry", "funny", "highlight", "reaction", "gaming", "chat-interaction", "insight", "inspiring", "controversial", "relatable", "valuable", "educational"]
+- **General**: ["co-hosting", "interactive", "humorous", "live-chemistry", "funny", "highlight", "reaction", "gaming", "chat-interaction", "insight", "inspiring", "controversial", "relatable", "valuable", "educational"]
+- **Sports** (use when detected_content_type is "sports"): ["进球", "射门", "头球", "点球", "红牌", "黄牌", "扑救", "任意球", "角球", "越位", "VAR", "换人", "助攻", "反击", "庆祝", "绝杀", "逆转", "乌龙球", "明星球员", "战术亮点", "赛事高光"]
+
+When content is sports, use sports tags. You may combine sports tags with general tags like "highlight" if applicable. You may also add custom tags not in the list if they accurately describe the moment. Aim for 3-5 tags per moment to maximize filtering options.
 
 ## IMPORTANT: JSON Response Format
 - Return ONLY valid JSON, no additional text or explanations

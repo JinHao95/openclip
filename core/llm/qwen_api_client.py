@@ -19,7 +19,7 @@ from core.config import LLM_CONFIG, API_KEY_ENV_VARS, _normalize_chat_completion
 class QwenMessage:
     """Represents a message in the conversation"""
     role: str  # "system", "user", or "assistant"
-    content: str
+    content: Any  # str or list of content parts (for vision)
 
 
 class QwenAPIClient:
@@ -174,7 +174,21 @@ class QwenAPIClient:
                 raise Exception(f"Unexpected response format: {response}")
         except (KeyError, IndexError) as e:
             raise Exception(f"Failed to parse response: {e}\nResponse: {response}")
-    
+
+    def vision_chat(self, prompt: str, images: List[str], model: Optional[str] = None) -> str:
+        """Send text + base64 images to vision-capable model."""
+        model = model or self.default_model
+        content = [{"type": "text", "text": prompt}]
+        for img_b64 in images:
+            content.append({"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{img_b64}"}})
+        messages = [QwenMessage(role="user", content=content)]
+        response = self.chat_completion(messages, model=model)
+        if "choices" in response:
+            return response["choices"][0]["message"]["content"]
+        elif "output" in response:
+            return response["output"]["text"]
+        raise Exception(f"Unexpected response format: {response}")
+
     def conversation_chat(
         self,
         messages: List[QwenMessage],

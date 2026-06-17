@@ -34,6 +34,7 @@ from core.browser_session import (
     normalize_input_type,
     reset_browser_state,
 )
+from core.clip_concat import concat_clips
 from core.file_string_utils import FileStringUtils
 from core.subtitle_burner import SubtitleBurner, SubtitleStyleConfig
 # Import the video orchestrator
@@ -641,16 +642,44 @@ def display_results(result):
                 st.write(f"Generated {clips.get('total_clips', 0)} clips")
                 if clips.get('clips_info'):
                     output_dir = Path(clips.get('output_dir', ''))
+                    # Tag filter
+                    all_tags = sorted(set(
+                        tag for clip in clips['clips_info'] for tag in clip.get('tags', [])
+                    ))
+                    filtered_clips = clips['clips_info']
+                    if all_tags:
+                        selected_tags = st.multiselect("🏷 Filter by tag", all_tags, default=[], key="clip_tag_filter")
+                        if selected_tags:
+                            filtered_clips = [c for c in filtered_clips if any(t in selected_tags for t in c.get('tags', []))]
                     # Create columns for side-by-side display (2 per row) with minimal gap
                     cols = st.columns(2, gap="xxsmall")
-                    for i, clip in enumerate(clips['clips_info']):
+                    selected_clip_paths = []
+                    for i, clip in enumerate(filtered_clips):
                         clip_filename = clip.get('filename')
                         if clip_filename:
                             clip_path = output_dir / clip_filename
                             if clip_path.exists():
                                 with cols[i % 2]:
+                                    checked = st.checkbox("选择", key=f"select_clip_{i}", value=True)
+                                    if checked:
+                                        selected_clip_paths.append(str(clip_path))
                                     st.video(str(clip_path), width=450)
-                                    st.caption(f"**{clip.get('title', 'Untitled')}**")
+                                    tags_str = ", ".join(clip.get('tags', []))
+                                    caption = f"**{clip.get('title', 'Untitled')}**"
+                                    if tags_str:
+                                        caption += f"  \n🏷 {tags_str}"
+                                    st.caption(caption)
+
+                    if selected_clip_paths:
+                        if st.button("🎬 生成高光合集视频"):
+                            compilation_path = str(output_dir / "highlight_compilation.mp4")
+                            with st.spinner("正在拼接高光合集..."):
+                                ok = concat_clips(selected_clip_paths, compilation_path)
+                            if ok and Path(compilation_path).exists():
+                                st.success("合集视频生成成功！")
+                                st.video(compilation_path)
+                            else:
+                                st.error("合集视频生成失败，请检查日志。")
         
         # Display post-processing info (titles and/or subtitles)
         if getattr(result, 'post_processing', None) and result.post_processing.get('success'):
@@ -970,7 +999,7 @@ with st.sidebar:
     max_clips = st.number_input(
         t['max_clips'],
         min_value=1,
-        max_value=20,
+        max_value=100,
         value=int(data['max_clips']),
         step=1,
         help=t['max_clips_help'],

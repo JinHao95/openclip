@@ -20,7 +20,7 @@ class CustomOpenAIMessage:
     """Represents a message in an OpenAI-compatible conversation."""
 
     role: str
-    content: str
+    content: Any  # str or list of content parts (for vision)
 
 
 class CustomOpenAIAPIClient:
@@ -183,6 +183,17 @@ class CustomOpenAIAPIClient:
                 f"Response: {response}"
             )
         return content
+
+    def vision_chat(self, prompt: str, images: List[str], model: Optional[str] = None) -> str:
+        """Send text + base64 images to vision-capable model."""
+        model = model or self.default_model
+        content = [{"type": "text", "text": prompt}]
+        for img_b64 in images:
+            content.append({"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{img_b64}"}})
+        messages = [CustomOpenAIMessage(role="user", content=content)]
+        response = self.chat_completion(messages, model=model)
+        msg = response["choices"][0]["message"]
+        return self._extract_content(msg)
 
     def conversation_chat(
         self,

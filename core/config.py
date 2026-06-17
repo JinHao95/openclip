@@ -164,7 +164,7 @@ PARAFORMER_DEVICE: str = os.getenv("PARAFORMER_DEVICE", "auto")
 DEFAULT_TITLE_STYLE: str = "fire_flame"
 
 # Maximum number of highlight clips to generate
-MAX_CLIPS: int = 5
+MAX_CLIPS: int = 100
 
 # Subtitle translation post-processing
 SUBTITLE_TRANSLATION_MAX_WORKERS: int = max(
@@ -178,14 +178,14 @@ SUBTITLE_TRANSLATION_LAUNCH_STAGGER_SECONDS: float = max(
 
 # Audio energy analysis for long video acceleration
 AUDIO_ENERGY_CONFIG: dict = {
-    "threshold_k": 2.0,
-    "rolling_window_seconds": 60,
-    "min_segment_seconds": 10,
-    "merge_gap_seconds": 5,
+    "threshold_k": 1.5,
+    "rolling_window_seconds": 90,
+    "min_segment_seconds": 15,
+    "merge_gap_seconds": 10,
     "context_padding_seconds": 5,
-    "min_coverage_ratio": 0.10,
-    "max_coverage_ratio": 0.60,
-    "fallback_top_n": 3,
+    "min_coverage_ratio": 0.15,
+    "max_coverage_ratio": 0.40,
+    "fallback_top_n": 5,
 }
 
 # Skip download by default (use existing files if available)

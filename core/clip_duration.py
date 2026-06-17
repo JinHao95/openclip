@@ -21,6 +21,30 @@ class ClipDurationPreference:
 
 
 CLIP_DURATION_PRESETS: dict[str, ClipDurationPreference] = {
+    "8_30": ClipDurationPreference(
+        preset="8_30",
+        label="8s-30s",
+        min_seconds=8,
+        max_seconds=30,
+        ideal_min_seconds=10,
+        ideal_max_seconds=25,
+        guidance=(
+            "Target 8-30 second highlights. Capture the single core action "
+            "(shot, save, goal, celebration) with minimal buildup. Prefer punchy, shareable clips."
+        ),
+    ),
+    "15_30": ClipDurationPreference(
+        preset="15_30",
+        label="15s-30s",
+        min_seconds=15,
+        max_seconds=30,
+        ideal_min_seconds=15,
+        ideal_max_seconds=30,
+        guidance=(
+            "Target 15-30 second highlights. Capture only the core moment "
+            "(the shot, save, or celebration) without extended buildup."
+        ),
+    ),
     "auto": ClipDurationPreference(
         preset="auto",
         label="Auto (30s-3m)",

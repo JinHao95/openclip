@@ -428,10 +428,12 @@ class VideoOrchestrator:
 
                 from core.audio_energy_analyzer import AudioEnergyAnalyzer
                 energy_analyzer = AudioEnergyAnalyzer()
-                source_video = result.video_path if not result.was_split else result.video_parts[0]
-                energy_result = energy_analyzer.analyze(source_video)
 
-                if energy_result.fell_back_to_full:
+                # Always analyze original full video for consistent baseline
+                full_video = result.video_path
+                energy_result = energy_analyzer.analyze(full_video)
+
+                if energy_result.fell_back_to_full or not energy_result.segments:
                     logger.info("📝 Audio energy too uniform, falling back to full ASR")
                     if progress_callback:
                         progress_callback("Generating full transcript...", 35)
@@ -452,7 +454,7 @@ class VideoOrchestrator:
                     splits_dir.mkdir(parents=True, exist_ok=True)
                     transcript_result = await self.transcript_processor.process_transcripts_for_segments(
                         energy_result.segments,
-                        source_video,
+                        full_video,
                         str(splits_dir),
                         progress_callback,
                     )
@@ -497,6 +499,29 @@ class VideoOrchestrator:
                 if engaging_result:
                     result.engaging_moments_analysis = engaging_result
                     logger.info(f"   Found existing analysis: {engaging_result.get('aggregated_file')}")
+
+            # Step 4.5: Visual highlight verification + tagging (sports content with long_video_acceleration)
+            if self.long_video_acceleration and engaging_result and engaging_result.get('aggregated_file'):
+                try:
+                    import json
+                    from core.highlight_verifier import HighlightVerifier
+                    agg_file = engaging_result['aggregated_file']
+                    with open(agg_file, 'r', encoding='utf-8') as f:
+                        agg_data = json.load(f)
+                    moments = agg_data.get('top_engaging_moments', [])
+                    if moments:
+                        logger.info(f"🔍 Step 4.5: Visual verification of {len(moments)} moments...")
+                        if progress_callback:
+                            progress_callback("Visual highlight verification...", 65)
+                        video_for_verify = result.source_video_path or result.video_path
+                        verifier = HighlightVerifier(self.engaging_moments_analyzer.llm_client)
+                        verified = verifier.verify_and_tag(moments, str(video_for_verify))
+                        agg_data['top_engaging_moments'] = verified
+                        with open(agg_file, 'w', encoding='utf-8') as f:
+                            json.dump(agg_data, f, ensure_ascii=False, indent=2)
+                        logger.info(f"   Verified: {len(verified)}/{len(moments)} moments kept")
+                except Exception as e:
+                    logger.warning(f"Visual verification failed, continuing without it: {e}")
             
             # Create video-specific subfolders (needed by clips and cover generation)
             video_clips_dir = video_root_dir / "clips"
@@ -512,11 +537,14 @@ class VideoOrchestrator:
                     progress_callback("Generating video clips...", 70)
 
                 # Determine video directory
-                if result.was_split and result.video_parts:
+                # For long_video_acceleration, clips reference the full original video timeline
+                if self.long_video_acceleration:
+                    video_dir = Path(result.source_video_path or result.video_path).parent
+                elif result.was_split and result.video_parts:
                     video_dir = Path(result.video_parts[0]).parent
                 else:
                     video_dir = Path(result.video_path).parent
-                
+
                 # Determine subtitle directory
                 subtitle_dir = None
                 if result.was_split and result.transcript_parts:

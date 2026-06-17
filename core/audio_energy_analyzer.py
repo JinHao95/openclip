@@ -199,19 +199,31 @@ class AudioEnergyAnalyzer:
             logger.warning("Insufficient loudness data, falling back to full ASR")
             return AudioEnergyResult(total_duration=duration, fell_back_to_full=True)
 
-        segments = self._detect_segments(timestamps, loudness_values, duration)
+        # Binary-search style: find a k that lands coverage in [min, max]
+        k_low = self.threshold_k * 0.5
+        k_high = self.threshold_k * 1.5
+        best_segments = []
+        best_coverage = 0.0
 
-        coverage = sum(s["duration"] for s in segments) / duration if duration > 0 else 0
+        for k in [self.threshold_k, k_high, k_low,
+                  (self.threshold_k + k_low) / 2,
+                  (self.threshold_k + k_high) / 2]:
+            segs = self._detect_segments(timestamps, loudness_values, duration, k_override=k)
+            cov = sum(s["duration"] for s in segs) / duration if duration > 0 else 0
+            logger.info(f"  k={k:.2f} → {len(segs)} segments, coverage {cov:.1%}")
+            if self.min_coverage_ratio <= cov <= self.max_coverage_ratio:
+                best_segments = segs
+                best_coverage = cov
+                break
+            if cov > best_coverage and cov <= self.max_coverage_ratio:
+                best_segments = segs
+                best_coverage = cov
+            elif not best_segments and cov > 0:
+                best_segments = segs
+                best_coverage = cov
 
-        if coverage < self.min_coverage_ratio and segments:
-            logger.info(
-                f"Coverage {coverage:.1%} below minimum {self.min_coverage_ratio:.0%}, "
-                "retrying with lower threshold"
-            )
-            segments = self._detect_segments(
-                timestamps, loudness_values, duration, k_override=self.threshold_k * 0.7
-            )
-            coverage = sum(s["duration"] for s in segments) / duration if duration > 0 else 0
+        segments = best_segments
+        coverage = best_coverage
 
         if coverage < self.min_coverage_ratio:
             segments = self._fallback_top_n(timestamps, loudness_values, duration)

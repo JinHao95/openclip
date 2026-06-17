@@ -19,7 +19,7 @@ from core.config import LLM_CONFIG, API_KEY_ENV_VARS
 class OpenRouterMessage:
     """Represents a message in the conversation"""
     role: str  # "system", "user", or "assistant"
-    content: str
+    content: Any  # str or list of content parts (for vision)
 
 
 class OpenRouterAPIClient:
@@ -142,7 +142,17 @@ class OpenRouterAPIClient:
         if content is None:
             raise Exception(f"Model returned null content (possible content filter or empty response). Response: {response}")
         return content
-    
+
+    def vision_chat(self, prompt: str, images: List[str], model: Optional[str] = None) -> str:
+        """Send text + base64 images to vision-capable model."""
+        model = model or LLM_CONFIG["openrouter"]["default_model"]
+        content = [{"type": "text", "text": prompt}]
+        for img_b64 in images:
+            content.append({"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{img_b64}"}})
+        messages = [OpenRouterMessage(role="user", content=content)]
+        response = self.chat_completion(messages, model=model)
+        return response["choices"][0]["message"]["content"]
+
     def conversation_chat(
         self,
         messages: List[OpenRouterMessage],
