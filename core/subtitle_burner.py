@@ -218,6 +218,9 @@ class SubtitleBurner:
             elif provider == "minimax":
                 from core.llm.minimax_api_client import MiniMaxAPIClient
                 self.client = MiniMaxAPIClient(api_key=api_key, base_url=base_url)
+            elif provider == "doubao":
+                from core.llm.custom_openai_api_client import CustomOpenAIAPIClient
+                self.client = CustomOpenAIAPIClient(api_key=api_key, base_url=base_url)
             elif provider == "custom_openai":
                 from core.llm.custom_openai_api_client import CustomOpenAIAPIClient
                 self.client = CustomOpenAIAPIClient(api_key=api_key, base_url=base_url)

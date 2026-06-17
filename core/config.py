@@ -50,6 +50,7 @@ SUPPORTED_LLM_PROVIDERS = (
     "openrouter",
     "glm",
     "minimax",
+    "doubao",
     "custom_openai",
 )
 
@@ -101,6 +102,16 @@ LLM_CONFIG: Dict[str, Dict[str, Any]] = {
             "stream": False
         }
     },
+    "doubao": {
+        "base_url": _env_llm_base_url("doubao", "https://ark.cn-beijing.volces.com/api/v3/chat/completions"),
+        "default_model": _env_llm_model("doubao", "doubao-seed-2-0-pro-260215"),
+        "default_params": {
+            "max_tokens": 16384,
+            "temperature": 0.7,
+            "top_p": 0.8,
+            "stream": False
+        }
+    },
     "custom_openai": {
         "base_url": _env_llm_base_url("custom_openai", "https://api.openai.com/v1/chat/completions"),
         "default_model": _env_llm_model("custom_openai", ""),
@@ -120,6 +131,7 @@ API_KEY_ENV_VARS: Dict[str, str] = {
     "openrouter": "OPENROUTER_API_KEY",
     "glm": "GLM_API_KEY",
     "minimax": "MINIMAX_API_KEY",
+    "doubao": "DOUBAO_API_KEY",
     "custom_openai": "CUSTOM_OPENAI_API_KEY",
 }
 

@@ -189,14 +189,16 @@ class YouTubeDownloader:
             return self.quality
     
     def validate_url(self, url: str) -> bool:
-        """Validate if URL is a valid YouTube URL"""
+        """Validate if URL is supported by this downloader (YouTube + yt-dlp compatible)"""
         youtube_patterns = [
             r'https?://(?:www\.)?youtube\.com/watch\?v=[\w-]+',
             r'https?://(?:www\.)?youtube\.com/shorts/[\w-]+',
             r'https?://youtu\.be/[\w-]+',
             r'https?://(?:www\.)?youtube\.com/embed/[\w-]+',
+            r'https?://(?:www\.)?xiaohongshu\.com/',
+            r'https?://(?:www\.)?xhslink\.com/',
         ]
-        
+
         return any(re.match(pattern, url) for pattern in youtube_patterns)
     
     def _sanitize_filename(self, filename: str) -> str:

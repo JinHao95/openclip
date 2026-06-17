@@ -59,12 +59,15 @@ class InsightsAnalyzer:
         elif self.provider == "minimax":
             from core.llm.minimax_api_client import MiniMaxAPIClient
             self.llm_client = MiniMaxAPIClient(api_key, base_url=self.base_url)
+        elif self.provider == "doubao":
+            from core.llm.custom_openai_api_client import CustomOpenAIAPIClient
+            self.llm_client = CustomOpenAIAPIClient(api_key, base_url=self.base_url)
         elif self.provider == "custom_openai":
             from core.llm.custom_openai_api_client import CustomOpenAIAPIClient
             self.llm_client = CustomOpenAIAPIClient(api_key, base_url=self.base_url)
         else:
             raise ValueError(
-                f"Unsupported provider: {provider}. Supported: 'qwen', 'openrouter', 'glm', 'minimax', 'custom_openai'."
+                f"Unsupported provider: {provider}. Supported: {', '.join(SUPPORTED_LLM_PROVIDERS)}"
             )
 
         if self.use_background:

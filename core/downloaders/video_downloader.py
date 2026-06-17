@@ -107,11 +107,19 @@ class VideoDownloader:
             r'https?://youtu\.be/[\w-]+',
             r'https?://(?:www\.)?youtube\.com/embed/[\w-]+',
         ]
-        
+
+        # Xiaohongshu patterns
+        xiaohongshu_patterns = [
+            r'https?://(?:www\.)?xiaohongshu\.com/',
+            r'https?://(?:www\.)?xhslink\.com/',
+        ]
+
         if any(re.match(pattern, url) for pattern in bilibili_patterns):
             return 'bilibili'
         elif any(re.match(pattern, url) for pattern in youtube_patterns):
             return 'youtube'
+        elif any(re.match(pattern, url) for pattern in xiaohongshu_patterns):
+            return 'xiaohongshu'
         else:
             return 'unknown'
     
@@ -126,7 +134,7 @@ class VideoDownloader:
             Video information dictionary
         """
         platform = self.detect_platform(url)
-        
+
         if platform == 'bilibili':
             logger.info("🎬 Detected platform: Bilibili")
             video_info = await self.bilibili_downloader.get_video_info(url)
@@ -135,9 +143,13 @@ class VideoDownloader:
             logger.info("🎬 Detected platform: YouTube")
             video_info = await self.youtube_downloader.get_video_info(url)
             return video_info.to_dict()
+        elif platform == 'xiaohongshu':
+            logger.info("🎬 Detected platform: Xiaohongshu")
+            video_info = await self.youtube_downloader.get_video_info(url)
+            return video_info.to_dict()
         else:
             raise ValueError(f"Unsupported platform or invalid URL: {url}")
-    
+
     async def download_video(
         self,
         url: str,
@@ -146,17 +158,17 @@ class VideoDownloader:
     ) -> Dict[str, str]:
         """
         Download video and subtitles from any supported platform
-        
+
         Args:
             url: Video URL (Bilibili or YouTube)
             custom_filename: Custom filename template
             progress_callback: Progress callback function
-            
+
         Returns:
             Dictionary containing video_path, subtitle_path, and video_info
         """
         platform = self.detect_platform(url)
-        
+
         if platform == 'bilibili':
             logger.info("🎬 Downloading from Bilibili...")
             return await self.bilibili_downloader.download_video(
@@ -164,6 +176,11 @@ class VideoDownloader:
             )
         elif platform == 'youtube':
             logger.info("🎬 Downloading from YouTube...")
+            return await self.youtube_downloader.download_video(
+                url, custom_filename, progress_callback
+            )
+        elif platform == 'xiaohongshu':
+            logger.info("🎬 Downloading from Xiaohongshu...")
             return await self.youtube_downloader.download_video(
                 url, custom_filename, progress_callback
             )
