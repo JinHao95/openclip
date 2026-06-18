@@ -7,6 +7,7 @@ Identifies engaging moments from video transcripts using LLM APIs
 import json
 import logging
 import os
+import asyncio
 from pathlib import Path
 from typing import List, Dict, Any, Optional
 from datetime import datetime
@@ -390,7 +391,6 @@ class EngagingMomentsAnalyzer:
         chunks = [entries[i:i+CHUNK_SIZE] for i in range(0, len(entries), CHUNK_SIZE)]
         logger.info(f"📦 Splitting {len(entries)} entries into {len(chunks)} chunks for parallel analysis")
 
-        import asyncio
         tasks = [
             self._analyze_entries_chunk(chunk, f"{part_name}_chunk{i+1:02d}", srt_path)
             for i, chunk in enumerate(chunks)
@@ -440,7 +440,10 @@ class EngagingMomentsAnalyzer:
         self._export_debug_prompt(analysis_prompt, "part_analysis", chunk_name)
 
         try:
-            response = self.llm_client.simple_chat(analysis_prompt, model=self.model)
+            loop = asyncio.get_event_loop()
+            response = await loop.run_in_executor(
+                None, lambda: self.llm_client.simple_chat(analysis_prompt, model=self.model)
+            )
             try:
                 result = self._extract_and_parse_json(response, chunk_name, entries)
             except json.JSONDecodeError as e:

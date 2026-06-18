@@ -40,6 +40,7 @@ from core.video_utils import (
 )
 from core.config import DEFAULT_LLM_PROVIDER, DEFAULT_TITLE_STYLE, API_KEY_ENV_VARS, MAX_DURATION_MINUTES, WHISPER_MODEL, MAX_CLIPS, SKIP_DOWNLOAD, SKIP_TRANSCRIPT, SUPPORTED_LLM_PROVIDERS, SUBTITLE_TRANSLATION_MAX_WORKERS
 from core.clip_duration import CLIP_DURATION_PRESETS, DEFAULT_CLIP_LENGTH_PRESET, normalize_clip_length_preset
+import time as _time
 
 # Set up logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -369,7 +370,7 @@ class VideoOrchestrator:
             splits_dir = video_root_dir / "splits"
             splits_dir.mkdir(parents=True, exist_ok=True)
 
-            if needs_splitting:
+            if needs_splitting and not self.long_video_acceleration:
                 logger.info(f"🔧 Video duration > 20 minutes, splitting required")
                 split_result = await self.video_splitter.split_video_async(
                     result.video_path,
@@ -430,8 +431,11 @@ class VideoOrchestrator:
                 energy_analyzer = AudioEnergyAnalyzer()
 
                 # Always analyze original full video for consistent baseline
-                full_video = result.video_path
+                full_video = result.source_video_path or result.video_path
+                t0 = _time.time()
                 energy_result = energy_analyzer.analyze(full_video)
+                elapsed = _time.time() - t0
+                logger.info(f"⏱️  Audio energy analysis: {elapsed:.1f}s")
 
                 if energy_result.fell_back_to_full or not energy_result.segments:
                     logger.info("📝 Audio energy too uniform, falling back to full ASR")
@@ -452,12 +456,15 @@ class VideoOrchestrator:
                         progress_callback("Transcribing high-energy segments...", 35)
                     splits_dir = video_root_dir / "splits"
                     splits_dir.mkdir(parents=True, exist_ok=True)
+                    t0 = _time.time()
                     transcript_result = await self.transcript_processor.process_transcripts_for_segments(
                         energy_result.segments,
                         full_video,
                         str(splits_dir),
                         progress_callback,
                     )
+                    elapsed = _time.time() - t0
+                    logger.info(f"⏱️  Whisper transcription ({len(energy_result.segments)} segments, 8 workers): {elapsed:.1f}s")
 
                 result.transcript_source = transcript_result['source']
                 if transcript_result.get('transcript_parts'):
@@ -515,11 +522,13 @@ class VideoOrchestrator:
                             progress_callback("Visual highlight verification...", 65)
                         video_for_verify = result.source_video_path or result.video_path
                         verifier = HighlightVerifier(self.engaging_moments_analyzer.llm_client)
+                        t0 = _time.time()
                         verified = verifier.verify_and_tag(moments, str(video_for_verify))
+                        elapsed = _time.time() - t0
                         agg_data['top_engaging_moments'] = verified
                         with open(agg_file, 'w', encoding='utf-8') as f:
                             json.dump(agg_data, f, ensure_ascii=False, indent=2)
-                        logger.info(f"   Verified: {len(verified)}/{len(moments)} moments kept")
+                        logger.info(f"⏱️  Visual verification: {elapsed:.1f}s → {len(verified)}/{len(moments)} moments kept")
                 except Exception as e:
                     logger.warning(f"Visual verification failed, continuing without it: {e}")
             
@@ -918,30 +927,38 @@ class VideoOrchestrator:
             if result.was_split and result.transcript_parts:
                 # Analyze each part separately
                 logger.info(f"🔍 Analyzing {len(result.transcript_parts)} video parts...")
-                
+
                 for i, transcript_path in enumerate(result.transcript_parts):
                     part_name = f"part{i+1:02d}"
-                    
+
                     # Analyze this part
+                    t0 = _time.time()
                     highlights = await self.engaging_moments_analyzer.analyze_part_for_engaging_moments(
                         transcript_path, part_name
                     )
-                    
+                    elapsed = _time.time() - t0
+                    n_moments = len(highlights.get('engaging_moments', []))
+                    logger.info(f"⏱️  Part {part_name} analysis: {elapsed:.1f}s → {n_moments} moments found")
+
                     # Save highlights for this part
                     transcript_dir = Path(transcript_path).parent
                     highlights_file = transcript_dir / f"highlights_{part_name}.json"
                     await self.engaging_moments_analyzer.save_highlights_to_file(highlights, str(highlights_file))
                     highlights_files.append(str(highlights_file))
-                    
+
                     if progress_callback:
                         progress = 50 + (i + 1) * 10 / len(result.transcript_parts)
                         progress_callback(f"Analyzed part {i+1}/{len(result.transcript_parts)}", progress)
-                
+
                 # Aggregate top moments
                 logger.info(f"🔄 Aggregating top {self.engaging_moments_analyzer.max_clips} engaging moments...")
+                t0 = _time.time()
                 top_moments = await self.engaging_moments_analyzer.aggregate_top_moments(
                     highlights_files, str(transcript_dir)
                 )
+                elapsed = _time.time() - t0
+                n_top = len(top_moments.get('top_engaging_moments', []))
+                logger.info(f"⏱️  Aggregation: {elapsed:.1f}s → {n_top} top moments selected")
                 
                 # Save aggregated results
                 aggregated_file = transcript_dir / "top_engaging_moments.json"

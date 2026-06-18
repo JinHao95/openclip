@@ -113,10 +113,10 @@ LLM_CONFIG: Dict[str, Dict[str, Any]] = {
         }
     },
     "custom_openai": {
-        "base_url": _env_llm_base_url("custom_openai", "https://api.openai.com/v1/chat/completions"),
-        "default_model": _env_llm_model("custom_openai", ""),
+        "base_url": _env_llm_base_url("custom_openai", "https://oneapi-comate.baidu-int.com/v1/chat/completions"),
+        "default_model": _env_llm_model("custom_openai", "gpt-5.5"),
         "default_params": {
-            "max_tokens": 8192,
+            "max_tokens": 16384,
             "temperature": 0.7,
             "top_p": 0.8,
             "stream": False
@@ -137,7 +137,7 @@ API_KEY_ENV_VARS: Dict[str, str] = {
 
 
 # Default LLM provider
-DEFAULT_LLM_PROVIDER: str = "qwen"
+DEFAULT_LLM_PROVIDER: str = "custom_openai"
 
 # Video splitting
 MAX_DURATION_MINUTES: float = 20.0

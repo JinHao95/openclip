@@ -10,6 +10,7 @@ import sys
 import os
 import asyncio
 import logging
+import threading
 from pathlib import Path
 from typing import Optional, Dict, List, Callable, Any
 import whisper
@@ -276,17 +277,19 @@ class TranscriptProcessor:
         video_path: str,
         output_dir: str,
         progress_callback: Optional[Callable[[str, float], None]] = None,
-        max_workers: int = 3,
+        max_workers: int = 8,
     ) -> Dict[str, Any]:
         """Transcribe only specified time segments in parallel, output a merged SRT."""
         import tempfile
-        from concurrent.futures import ProcessPoolExecutor, as_completed
+        from concurrent.futures import ThreadPoolExecutor, as_completed
+        import shutil
 
         video_path = str(video_path)
         output_dir = Path(output_dir)
         output_dir.mkdir(parents=True, exist_ok=True)
         video_stem = Path(video_path).stem
         total_segments = len(segments)
+        cancelled = threading.Event()
 
         # Phase 1: extract all audio segments in parallel (IO-bound, fast)
         seg_work_dirs = []
@@ -306,19 +309,19 @@ class TranscriptProcessor:
         if progress_callback:
             progress_callback(f"Audio extracted for {total_segments} segments, starting transcription...", 37)
 
-        # Phase 2: transcribe segments (CPU-bound via whisper)
-        all_srt_entries_indexed = []
-        completed = 0
-        for i, seg, tmpdir, seg_audio_path in seg_work_dirs:
-            start = seg["start"]
+        # Phase 2: transcribe segments in parallel (CPU-bound via whisper)
 
+        def _transcribe_one(item):
+            if cancelled.is_set():
+                return None
+            i, seg, tmpdir, seg_audio_path = item
+            start = seg["start"]
             detected_language = self._detect_transcript_language(seg_audio_path)
             backend = select_transcript_backend(
                 detected_language=detected_language,
                 paraformer_available=self.paraformer_processor.is_available(),
                 use_whisperx=self.use_whisperx,
             )
-
             srt_path = None
             if backend == "paraformer":
                 try:
@@ -327,7 +330,6 @@ class TranscriptProcessor:
                     )
                 except Exception:
                     backend = "whisper"
-
             if not srt_path:
                 run_whisper_cli(
                     seg_audio_path,
@@ -337,7 +339,6 @@ class TranscriptProcessor:
                     output_dir=tmpdir,
                 )
                 srt_path = str(Path(tmpdir) / f"{Path(seg_audio_path).stem}.srt")
-
             entries = []
             if srt_path and Path(srt_path).exists():
                 entries = self._parse_and_offset_srt(srt_path, start)
@@ -345,20 +346,31 @@ class TranscriptProcessor:
                     f"✅ Segment {i+1} ({start:.0f}-{seg['end']:.0f}s): "
                     f"{len(entries)} subtitle entries via {backend}"
                 )
-
-            all_srt_entries_indexed.append((i, entries))
-            completed += 1
-
-            if progress_callback:
-                pct = 37 + (completed / total_segments) * 11
-                progress_callback(
-                    f"Transcribed {completed}/{total_segments} segments",
-                    pct,
-                )
-
-            # Cleanup tmpdir
-            import shutil
             shutil.rmtree(tmpdir, ignore_errors=True)
+            return (i, entries)
+
+        all_srt_entries_indexed = []
+        completed = 0
+        with ThreadPoolExecutor(max_workers=max_workers) as executor:
+            futures = {executor.submit(_transcribe_one, item): item for item in seg_work_dirs}
+            for future in as_completed(futures):
+                result = future.result()
+                if result is None:
+                    continue
+                idx, entries = result
+                all_srt_entries_indexed.append((idx, entries))
+                completed += 1
+                if progress_callback:
+                    try:
+                        pct = 37 + (completed / total_segments) * 11
+                        progress_callback(
+                            f"Transcribed {completed}/{total_segments} segments",
+                            pct,
+                        )
+                    except Exception:
+                        cancelled.set()
+                        executor.shutdown(wait=False, cancel_futures=True)
+                        raise
 
         # Merge in order
         all_srt_entries_indexed.sort(key=lambda x: x[0])
