@@ -6,6 +6,7 @@ Simple threading-based approach without Celery/Redis
 
 import json
 import uuid
+import shutil
 import threading
 from pathlib import Path
 from datetime import datetime
@@ -266,17 +267,49 @@ class JobManager:
         logger.info(f"Job {job_id} cancelled")
     
     def delete_job(self, job_id: str):
-        """Delete a job record. Upload cleanup is handled separately."""
+        """Delete a job record and its output directory (if no other job uses it)."""
         job_file = self.jobs_dir / f"{job_id}.json"
         if job_file.exists():
+            try:
+                with open(job_file, 'r') as f:
+                    job_data = json.load(f)
+                result = job_data.get('result') or {}
+                video_dir = result.get('video_root_dir') or result.get('output_dir')
+                if video_dir and Path(video_dir).exists():
+                    # Check no other active/pending job shares this output
+                    other_uses_dir = False
+                    for other_file in self.jobs_dir.glob("*.json"):
+                        if other_file.name == f"{job_id}.json":
+                            continue
+                        try:
+                            other = json.loads(other_file.read_text())
+                            other_result = other.get('result') or {}
+                            other_dir = other_result.get('video_root_dir') or other_result.get('output_dir')
+                            if other_dir == video_dir:
+                                other_uses_dir = True
+                                break
+                            if other.get('status') in ('pending', 'processing'):
+                                other_opts = other.get('options') or {}
+                                if other_opts.get('output_dir') and video_dir.startswith(other_opts['output_dir']):
+                                    other_uses_dir = True
+                                    break
+                        except Exception:
+                            continue
+                    if not other_uses_dir:
+                        shutil.rmtree(video_dir, ignore_errors=True)
+                        logger.info(f"Deleted output directory: {video_dir}")
+                    else:
+                        logger.info(f"Skipped directory cleanup (in use by another job): {video_dir}")
+            except Exception as e:
+                logger.warning(f"Failed to clean output for job {job_id}: {e}")
             job_file.unlink()
-        
+
         with self._lock:
             if job_id in self.active_jobs:
                 del self.active_jobs[job_id]
             if job_id in self.threads:
                 del self.threads[job_id]
-        
+
         logger.info(f"Job {job_id} deleted")
     
     def retry_job(self, job_id: str) -> Optional[str]:

@@ -36,6 +36,7 @@ PERSISTED_TOP_LEVEL_FIELDS = {
     "cookie_browser",
     "mode",
     "agentic_analysis",
+    "visual_verification",
 }
 
 PERSISTED_LLM_PROVIDER_FIELDS = {"model", "base_url"}
@@ -51,7 +52,7 @@ SAFE_ENUM_FIELDS = {
     "subtitle_style_vertical_position": {"bottom", "lower_middle", "middle"},
     "subtitle_style_background_style": {"none", "light_box", "solid_box"},
     "mode": {"engaging_moments"},
-    "clip_length_preset": set(CLIP_DURATION_PRESETS.keys()),
+    "clip_length_preset": set(CLIP_DURATION_PRESETS.keys()) | {"8_30", "15_30", "auto", "30_60", "60_90", "90_180", "180_300"},
 }
 
 BOOLEAN_FIELDS = {
@@ -62,6 +63,7 @@ BOOLEAN_FIELDS = {
     "burn_subtitles",
     "generate_cover",
     "agentic_analysis",
+    "visual_verification",
 }
 
 INTEGER_FIELDS = {

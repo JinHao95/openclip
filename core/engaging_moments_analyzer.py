@@ -688,18 +688,11 @@ Please fix the JSON and return ONLY the valid JSON, no explanations:
     
     async def aggregate_top_moments(self, highlights_files: List[str], output_dir: str) -> Dict[str, Any]:
         """
-        Aggregate engaging moments from multiple parts and select top moments
-
-        Args:
-            highlights_files: List of paths to highlights JSON files
-            output_dir: Directory to save the aggregated result
-
-        Returns:
-            Dictionary with top engaging moments
+        Aggregate engaging moments from multiple parts, sort by time, take top N.
+        No LLM call — deterministic sort by start_time.
         """
         logger.info("🔄 Aggregating top engaging moments...")
 
-        # Check if any moments exist
         all_moments = []
         for file_path in highlights_files:
             try:
@@ -716,35 +709,34 @@ Please fix the JSON and return ONLY the valid JSON, no explanations:
             logger.warning("No engaging moments found to aggregate")
             return self._create_empty_aggregation_result()
 
-        # Build aggregation prompt using shared method
-        aggregation_prompt = self.build_aggregation_prompt(highlights_files)
+        all_moments.sort(key=lambda m: self.time_to_seconds(m.get('start_time', '00:00:00')))
 
-        # Export debug prompt if enabled
-        self._export_debug_prompt(aggregation_prompt, "aggregation")
-        
-        try:
-            # Call LLM API for aggregation
-            response = self.llm_client.simple_chat(aggregation_prompt, model=self.model)
-            
-            # Parse JSON response with improved extraction
-            try:
-                result = self._extract_and_parse_aggregation_json(response)
-                
-            except json.JSONDecodeError as e:
-                logger.error(f"Failed to parse aggregation JSON: {e}")
-                logger.debug(f"Raw response: {response}")
-                result = self._create_fallback_aggregation(all_moments)
-                
-            except json.JSONDecodeError as e:
-                logger.error(f"Failed to parse aggregation JSON: {e}")
-                logger.debug(f"Raw response: {response}")
-                result = self._create_fallback_aggregation(all_moments)
-                
-        except Exception as e:
-            logger.error(f"Error in aggregation API call: {e}")
-            result = self._create_fallback_aggregation(all_moments)
-        
-        return result
+        top_moments = all_moments[:self.max_clips]
+        for i, moment in enumerate(top_moments):
+            moment['rank'] = i + 1
+            if 'timing' not in moment:
+                moment['timing'] = {
+                    'video_part': moment.pop('_source_video_part', 'unknown'),
+                    'start_time': moment.get('start_time', '00:00:00'),
+                    'end_time': moment.get('end_time', '00:00:00'),
+                    'duration': f"{moment.get('duration_seconds', 0)}s",
+                }
+            elif '_source_video_part' in moment:
+                moment['timing']['video_part'] = moment.pop('_source_video_part')
+
+        logger.info(f"✅ Aggregated {len(top_moments)} moments (sorted by time)")
+        return {
+            "top_engaging_moments": top_moments,
+            "total_moments": len(top_moments),
+            "analysis_timestamp": datetime.now().isoformat() + 'Z',
+            "aggregation_criteria": f"Time-sorted, top {self.max_clips}",
+            "analysis_summary": {
+                "highest_engagement_themes": [],
+                "total_engaging_content_time": "N/A",
+                "recommendation": "Time-based aggregation"
+            },
+            "honorable_mentions": []
+        }
 
     def build_pre_verify_pool(self, highlights_files: List[str], pool_size: int) -> Dict[str, Any]:
         """

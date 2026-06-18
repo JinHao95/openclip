@@ -197,6 +197,8 @@ TRANSLATIONS = {
         'user_intent_placeholder': 'e.g. all goals and key saves',
         'agentic_analysis': 'Enhanced Clip Quality',
         'agentic_analysis_help': 'Runs extra AI review and refinement passes to improve clip selection and boundaries. Slower, but usually produces cleaner standalone clips.',
+        'visual_verification': 'Visual Verification',
+        'visual_verification_help': 'Use video keyframes to verify highlights. Rejects moments where subtitles are exciting but the actual footage is mundane. Slower but more accurate.',
         'advanced_options': 'Advanced Options',
         'override_analysis_prompt': 'Override Analysis Prompt',
         'override_analysis_prompt_help': 'Replace the default analysis prompt entirely. For developers who want full control over how the LLM analyzes content.',
@@ -207,8 +209,8 @@ TRANSLATIONS = {
         'long_video_acceleration_help': 'Performs audio energy analysis first to identify exciting moments (commentary spikes, crowd roars), then only transcribes those segments. Best for sports, live events, and content with clear emotional peaks.',
         'generate_clips': 'Generate Clips',
         'max_clips': 'Max Clips',
-        'clip_length': 'Clip Length',
-        'clip_length_help': 'Target clip length. OpenClip may adjust boundaries slightly to keep clips self-contained.',
+        'clip_length': 'Max Clip Length',
+        'clip_length_help': 'Maximum duration for each clip. Clips will not exceed this length.',
         'add_titles': 'Add Video Top Banner Title',
         'generate_cover': 'Generate Cover',
         'process_video': '🎬 Process Video',
@@ -318,6 +320,8 @@ TRANSLATIONS = {
         'user_intent_placeholder': '例如：所有进球和关键扑救',
         'agentic_analysis': '深度优化',
         'agentic_analysis_help': '会增加额外的 AI 审查和优化步骤，以提升片段选择和边界质量。处理会更慢，但通常能得到更干净、独立性更强的片段。',
+        'visual_verification': '视觉验证',
+        'visual_verification_help': '通过视频关键帧验证高光时刻。会过滤掉字幕激动但画面平淡的片段。更准确但速度更慢。',
         'advanced_options': '高级选项',
         'override_analysis_prompt': '覆盖分析提示词',
         'override_analysis_prompt_help': '完全替换默认分析提示词。适合想完全控制LLM分析方式的开发者。',
@@ -327,8 +331,8 @@ TRANSLATIONS = {
         'long_video_acceleration_help': '先进行音频能量分析，识别解说激动/观众欢呼等高能量片段，仅对候选片段做语音转写。适合体育赛事、直播回放等有明显情绪波动的视频。',
         'generate_clips': '生成高光片段',
         'max_clips': '最大片段数',
-        'clip_length': '片段时长',
-        'clip_length_help': '目标片段时长。OpenClip 可能会稍微调整边界，以保证片段完整。',
+        'clip_length': '片段时长上限',
+        'clip_length_help': '每个片段的最大时长，不会超过此上限。',
         'add_titles': '添加视频上方横幅标题',
         'generate_cover': '生成封面',
         'process_video': '🎬 处理视频',
@@ -651,6 +655,19 @@ def display_results(result):
                         selected_tags = st.multiselect("🏷 Filter by tag", all_tags, default=[], key="clip_tag_filter")
                         if selected_tags:
                             filtered_clips = [c for c in filtered_clips if any(t in selected_tags for t in c.get('tags', []))]
+                    # Select all / deselect all
+                    sel_col1, sel_col2 = st.columns(2)
+                    with sel_col1:
+                        select_all = st.button("全选", key="clip_select_all")
+                    with sel_col2:
+                        deselect_all = st.button("取消全选", key="clip_deselect_all")
+                    if select_all:
+                        for i in range(len(filtered_clips)):
+                            st.session_state[f"select_clip_{i}"] = True
+                    if deselect_all:
+                        for i in range(len(filtered_clips)):
+                            st.session_state[f"select_clip_{i}"] = False
+
                     # Create columns for side-by-side display (2 per row) with minimal gap
                     cols = st.columns(2, gap="xxsmall")
                     selected_clip_paths = []
@@ -660,26 +677,57 @@ def display_results(result):
                             clip_path = output_dir / clip_filename
                             if clip_path.exists():
                                 with cols[i % 2]:
-                                    checked = st.checkbox("选择", key=f"select_clip_{i}", value=True)
+                                    checked = st.checkbox("选择", key=f"select_clip_{i}", value=False)
                                     if checked:
                                         selected_clip_paths.append(str(clip_path))
                                     st.video(str(clip_path), width=450)
+                                    time_range = clip.get('time_range', '')
                                     tags_str = ", ".join(clip.get('tags', []))
                                     caption = f"**{clip.get('title', 'Untitled')}**"
+                                    if time_range:
+                                        caption += f"  \n⏱ {time_range}"
                                     if tags_str:
                                         caption += f"  \n🏷 {tags_str}"
                                     st.caption(caption)
 
                     if selected_clip_paths:
+                        # Reorder clips via drag-style number inputs
+                        st.markdown("**调整顺序** (数字越小越靠前):")
+                        order_cols = st.columns(min(len(selected_clip_paths), 4))
+                        order_indices = []
+                        for idx, sp in enumerate(selected_clip_paths):
+                            with order_cols[idx % len(order_cols)]:
+                                fname = Path(sp).stem[:20]
+                                o = st.number_input(fname, min_value=1, max_value=len(selected_clip_paths), value=idx+1, key=f"clip_order_{idx}")
+                                order_indices.append((o, sp))
+                        order_indices.sort(key=lambda x: x[0])
+                        ordered_paths = [p for _, p in order_indices]
+
                         if st.button("🎬 生成高光合集视频"):
                             compilation_path = str(output_dir / "highlight_compilation.mp4")
                             with st.spinner("正在拼接高光合集..."):
-                                ok = concat_clips(selected_clip_paths, compilation_path)
+                                ok = concat_clips(ordered_paths, compilation_path)
                             if ok and Path(compilation_path).exists():
                                 st.success("合集视频生成成功！")
                                 st.video(compilation_path)
                             else:
                                 st.error("合集视频生成失败，请检查日志。")
+
+                    # Delete rejected clips
+                    unselected = [
+                        str(output_dir / clip.get('filename'))
+                        for i, clip in enumerate(filtered_clips)
+                        if clip.get('filename') and not st.session_state.get(f"select_clip_{i}", False)
+                        and (output_dir / clip.get('filename')).exists()
+                    ]
+                    if unselected:
+                        if st.button("🗑 删除未选中的片段", type="secondary"):
+                            for p in unselected:
+                                Path(p).unlink(missing_ok=True)
+                                srt_p = Path(p).with_suffix('.srt')
+                                srt_p.unlink(missing_ok=True)
+                            st.success(f"已删除 {len(unselected)} 个片段")
+                            st.rerun()
         
         # Display post-processing info (titles and/or subtitles)
         if getattr(result, 'post_processing', None) and result.post_processing.get('success'):
@@ -689,24 +737,26 @@ def display_results(result):
                 post_dir = Path(titles.get('output_dir', ''))
                 if titles.get('processed_clips'):
                     clips_to_show = [
-                        (post_dir / c['filename'], c.get('title', 'Untitled'))
+                        (post_dir / c['filename'], c.get('title', 'Untitled'), c.get('time_range', ''))
                         for c in titles['processed_clips']
                         if c.get('filename')
                     ]
                 elif post_dir.exists():
-                    # subtitle-only or combined path: no processed_clips, list dir instead
                     clips_to_show = sorted(
-                        [(p, p.stem) for p in post_dir.glob('*.mp4') if not p.name.startswith('_')]
+                        [(p, p.stem, '') for p in post_dir.glob('*.mp4') if not p.name.startswith('_')]
                     )
                 else:
                     clips_to_show = []
                 if clips_to_show:
                     cols = st.columns(2, gap="xxsmall")
-                    for i, (clip_path, clip_title) in enumerate(clips_to_show):
+                    for i, (clip_path, clip_title, time_range) in enumerate(clips_to_show):
                         if clip_path.exists():
                             with cols[i % 2]:
                                 st.video(str(clip_path), width=450)
-                                st.caption(f"**{clip_title}**")
+                                caption = f"**{clip_title}**"
+                                if time_range:
+                                    caption += f"  \n⏱ {time_range}"
+                                st.caption(caption)
         
         # Display cover info
         if result.cover_generation and result.cover_generation.get('success'):
@@ -1063,6 +1113,14 @@ with st.sidebar:
     )
     data['agentic_analysis'] = agentic_analysis
 
+    visual_verification = st.checkbox(
+        t['visual_verification'],
+        value=bool(data.get('visual_verification', False)),
+        help=t['visual_verification_help'],
+        key=f"visual_verification_{st.session_state.reset_counter}"
+    )
+    data['visual_verification'] = visual_verification
+
     if burn_subtitles:
         st.markdown(f"**{t['subtitle_style_section']}**")
         st.caption(t['subtitle_style_help'])
@@ -1348,6 +1406,7 @@ def process_video_worker(job, progress_callback):
         agentic_analysis=options.get('agentic_analysis', False),
         normalize_boundaries=options.get('normalize_boundaries', True),
         long_video_acceleration=options.get('long_video_acceleration', False),
+        visual_verification=options.get('visual_verification', False),
     )
     
     result = asyncio.run(orchestrator.process_video(
@@ -1372,6 +1431,7 @@ def process_video_worker(job, progress_callback):
         'post_processing': getattr(result, 'post_processing', None),
         'cover_generation': getattr(result, 'cover_generation', None),
         'editor_project': getattr(result, 'editor_project', None),
+        'video_root_dir': getattr(result, 'video_root_dir', None),
     }
 
 

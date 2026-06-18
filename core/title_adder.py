@@ -527,7 +527,8 @@ class TitleAdder:
                     processed_clips.append({
                         'rank': rank,
                         'title': title,
-                        'filename': output_filename
+                        'filename': output_filename,
+                        'time_range': moment.get('timing', {}).get('start_time', '') + ' - ' + moment.get('timing', {}).get('end_time', ''),
                     })
                     logger.info(f"✓ Saved: {output_filename}")
                 else:

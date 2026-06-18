@@ -106,12 +106,11 @@ In addition to the general criteria above, apply these type-specific nuances bas
 - If the transcript contains action, always return at least 1 moment
 
 ### Duration Constraints (Must Follow)
-- Follow the runtime **Clip Length Preference** section injected by OpenClip
-- That section defines the hard minimum duration, hard maximum duration, and ideal target range for this run
-- Prefer clips whose natural arc fits the selected range
-- Do not pad weak or unrelated context just to satisfy the selected length
-- If a moment is shorter than the selected minimum, extend it only when nearby context improves standalone quality
-- If a moment is longer than the selected maximum, split it into multiple moments or trim to the most engaging complete arc
+- Follow the runtime **Clip Length Preference** section — each moment must NOT exceed the specified maximum
+- Prefer the shortest clip that captures the complete core action
+- Do not pad weak or unrelated context just to fill time
+- If a moment naturally exceeds the maximum, split it into multiple separate clips
+- Each clip should contain ONE core action (one shot, one save, one goal) — do not combine multiple actions
 
 ### Time Boundary Principles (Critical)
 

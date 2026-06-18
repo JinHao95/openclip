@@ -375,8 +375,13 @@ class TranscriptProcessor:
         # Merge in order
         all_srt_entries_indexed.sort(key=lambda x: x[0])
         all_srt_entries = []
-        for _, entries in all_srt_entries_indexed:
+        segment_srt_paths = []
+        for idx, entries in all_srt_entries_indexed:
             all_srt_entries.extend(entries)
+            if entries:
+                seg_srt_path = str(output_dir / f"{video_stem}_seg{idx:03d}.srt")
+                self._write_srt(entries, seg_srt_path)
+                segment_srt_paths.append(seg_srt_path)
 
         merged_srt_path = str(output_dir / f"{video_stem}.srt")
         self._write_srt(all_srt_entries, merged_srt_path)
@@ -386,6 +391,7 @@ class TranscriptProcessor:
             "source": "audio_energy_segments",
             "transcript_path": merged_srt_path,
             "transcript_parts": [merged_srt_path],
+            "segment_srt_paths": segment_srt_paths,
         }
 
     @staticmethod

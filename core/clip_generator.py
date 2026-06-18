@@ -6,6 +6,7 @@ import json
 import subprocess
 import logging
 import re
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from typing import Dict, List, Optional, Any
 
@@ -82,114 +83,105 @@ class ClipGenerator:
             
             clips_info = []
             successful_clips = 0
-            
-            # Process each engaging moment
-            for moment in data['top_engaging_moments']:
+
+            def _process_moment(moment):
                 rank = moment['rank']
                 title = moment['title']
                 video_part = moment['timing']['video_part']
                 start_time = moment['timing']['start_time']
                 end_time = moment['timing']['end_time']
                 duration = moment['timing']['duration']
-                
+
                 logger.info(f"[Rank {rank}] Processing: {title}")
-                
-                # Get source video file
+
                 input_video = self._find_video_file(video_part, video_dir)
                 if not input_video:
                     logger.warning(f"✗ Skipping rank {rank}: Video file not found")
-                    continue
-                
-                # Create output filename
+                    return None
+
                 safe_title = FileStringUtils.sanitize_filename(title)
                 output_filename = f"rank_{rank:02d}_{safe_title}.mp4"
                 output_path = self.output_dir / output_filename
-                
+
                 effective_start_time = start_time
                 effective_end_time = end_time
-                normalization_details = {
-                    'start': 'disabled',
-                    'end': 'disabled',
-                }
-                srt_segments = None
+                normalization_details = {'start': 'disabled', 'end': 'disabled'}
                 subtitle_file = self._find_subtitle_file(video_part, subtitle_dir)
                 normalization_source = "whisper" if moment.get("whisper_subtitle_source") else "original"
                 normalization_subtitle_file = moment.get("whisper_subtitle_source") or subtitle_file
                 logger.info(f"  📝 Boundary transcript source: {normalization_source}")
                 if normalization_subtitle_file and self.normalize_boundaries:
                     srt_segments = self._parse_srt_file(normalization_subtitle_file)
+                    if srt_segments:
+                        effective_start_time, effective_end_time, normalization_details = self._normalize_clip_boundaries(
+                            start_time, end_time, srt_segments
+                        )
 
-                if srt_segments:
-                    effective_start_time, effective_end_time, normalization_details = self._normalize_clip_boundaries(
-                        start_time,
-                        end_time,
-                        srt_segments
-                    )
-
-                # Create the clip
                 success = self._create_clip(
-                    input_video,
-                    effective_start_time,
-                    effective_end_time,
-                    str(output_path),
-                    title
+                    input_video, effective_start_time, effective_end_time,
+                    str(output_path), title
                 )
 
-                if success:
-                    # Generate subtitle file for the clip
-                    subtitle_filename = f"rank_{rank:02d}_{safe_title}.srt"
-                    subtitle_path = self.output_dir / subtitle_filename
-                    subtitle_generated = self._extract_subtitle_for_clip(
-                        video_part,
-                        effective_start_time,
-                        effective_end_time,
-                        str(subtitle_path),
-                        subtitle_dir
-                    )
-                    whisper_subtitle_filename = None
-                    whisper_subtitle_source = moment.get("whisper_subtitle_source")
-                    if whisper_subtitle_source:
-                        whisper_subtitle_filename = f"rank_{rank:02d}_{safe_title}.whisper.srt"
-                        whisper_subtitle_path = self.output_dir / whisper_subtitle_filename
-                        whisper_subtitle_generated = self._extract_subtitle_from_file(
-                            whisper_subtitle_source,
-                            effective_start_time,
-                            effective_end_time,
-                            str(whisper_subtitle_path),
-                        )
-                        if not whisper_subtitle_generated:
-                            whisper_subtitle_filename = None
-                    
-                    effective_duration = max(
-                        0.0,
-                        self._parse_time_flexible(effective_end_time)
-                        - self._parse_time_flexible(effective_start_time)
-                    )
-                    successful_clips += 1
-                    clips_info.append({
-                        'rank': rank,
-                        'title': title,
-                        'filename': output_filename,
-                        'subtitle_filename': subtitle_filename if subtitle_generated else None,
-                        'whisper_subtitle_filename': whisper_subtitle_filename,
-                        'duration': round(effective_duration or duration, 3),
-                        'video_part': video_part,
-                        'time_range': f"{effective_start_time} - {effective_end_time}",
-                        'original_time_range': f"{start_time} - {end_time}",
-                        'normalization_details': normalization_details,
-                        'engagement_level': moment['engagement_details'].get('engagement_level', 'N/A'),
-                        'why_engaging': moment['why_engaging'],
-                        'tags': moment.get('tags', []),
-                    })
-                    logger.info(f"✓ Saved: {output_filename}")
-                    if subtitle_generated:
-                        logger.info(f"✓ Subtitle: {subtitle_filename}")
-                    else:
-                        logger.info(f"⚠ No subtitle generated for this clip")
-                    if whisper_subtitle_filename:
-                        logger.info(f"✓ Whisper subtitle: {whisper_subtitle_filename}")
-                else:
+                if not success:
                     logger.error(f"✗ Failed: {output_filename}")
+                    return None
+
+                subtitle_filename = f"rank_{rank:02d}_{safe_title}.srt"
+                subtitle_path = self.output_dir / subtitle_filename
+                subtitle_generated = self._extract_subtitle_for_clip(
+                    video_part, effective_start_time, effective_end_time,
+                    str(subtitle_path), subtitle_dir
+                )
+                whisper_subtitle_filename = None
+                whisper_subtitle_source = moment.get("whisper_subtitle_source")
+                if whisper_subtitle_source:
+                    whisper_subtitle_filename = f"rank_{rank:02d}_{safe_title}.whisper.srt"
+                    whisper_subtitle_path = self.output_dir / whisper_subtitle_filename
+                    if not self._extract_subtitle_from_file(
+                        whisper_subtitle_source, effective_start_time,
+                        effective_end_time, str(whisper_subtitle_path),
+                    ):
+                        whisper_subtitle_filename = None
+
+                effective_duration = max(
+                    0.0,
+                    self._parse_time_flexible(effective_end_time)
+                    - self._parse_time_flexible(effective_start_time)
+                )
+                logger.info(f"✓ Saved: {output_filename}")
+                if subtitle_generated:
+                    logger.info(f"✓ Subtitle: {subtitle_filename}")
+                if whisper_subtitle_filename:
+                    logger.info(f"✓ Whisper subtitle: {whisper_subtitle_filename}")
+
+                return {
+                    'rank': rank,
+                    'title': title,
+                    'filename': output_filename,
+                    'subtitle_filename': subtitle_filename if subtitle_generated else None,
+                    'whisper_subtitle_filename': whisper_subtitle_filename,
+                    'duration': round(effective_duration or duration, 3),
+                    'video_part': video_part,
+                    'time_range': f"{effective_start_time} - {effective_end_time}",
+                    'original_time_range': f"{start_time} - {end_time}",
+                    'normalization_details': normalization_details,
+                    'engagement_level': moment['engagement_details'].get('engagement_level', 'N/A'),
+                    'why_engaging': moment['why_engaging'],
+                    'tags': moment.get('tags', []),
+                }
+
+            with ThreadPoolExecutor(max_workers=6) as executor:
+                futures = {
+                    executor.submit(_process_moment, m): m
+                    for m in data['top_engaging_moments']
+                }
+                for future in as_completed(futures):
+                    result = future.result()
+                    if result:
+                        clips_info.append(result)
+                        successful_clips += 1
+
+            clips_info.sort(key=lambda x: x['rank'])
             
             # Create summary
             if clips_info:

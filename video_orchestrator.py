@@ -93,7 +93,8 @@ class VideoOrchestrator:
                 agentic_analysis: bool = False,
                 clip_length_preset: str = DEFAULT_CLIP_LENGTH_PRESET,
                 normalize_boundaries: bool = True,
-                long_video_acceleration: bool = False):
+                long_video_acceleration: bool = False,
+                visual_verification: bool = False):
         """
         Initialize the video orchestrator
 
@@ -164,6 +165,7 @@ class VideoOrchestrator:
         self.download_processor = DownloadProcessor(self.downloader)
 
         self.long_video_acceleration = long_video_acceleration
+        self.visual_verification = visual_verification
 
         # Initialize the appropriate analyzer based on mode
         self.skip_analysis = skip_analysis
@@ -471,6 +473,8 @@ class VideoOrchestrator:
                     result.transcript_parts = transcript_result['transcript_parts']
                 if transcript_result.get('transcript_path'):
                     result.transcript_path = transcript_result['transcript_path']
+                # Store per-segment SRT paths for per-segment LLM analysis
+                result.segment_srt_paths = transcript_result.get('segment_srt_paths', [])
             else:
                 logger.info("📝 Step 3: Processing transcripts...")
                 transcript_result = await self.transcript_processor.process_transcripts(
@@ -507,8 +511,8 @@ class VideoOrchestrator:
                     result.engaging_moments_analysis = engaging_result
                     logger.info(f"   Found existing analysis: {engaging_result.get('aggregated_file')}")
 
-            # Step 4.5: Visual highlight verification + tagging (sports content with long_video_acceleration)
-            if self.long_video_acceleration and engaging_result and engaging_result.get('aggregated_file'):
+            # Step 4.5: Visual highlight verification + tagging
+            if self.visual_verification and engaging_result and engaging_result.get('aggregated_file'):
                 try:
                     import json
                     from core.highlight_verifier import HighlightVerifier
@@ -598,6 +602,11 @@ class VideoOrchestrator:
                             for c in clip_result.get('clips_info', [])
                             if c.get('filename') and c.get('title')
                         }
+                        _time_range_map = {
+                            c['filename']: c.get('time_range', '')
+                            for c in clip_result.get('clips_info', [])
+                            if c.get('filename')
+                        }
                         _current_clips = list(_title_map.keys())
                         ass_tmp_dir = video_clips_post_processed_dir / "_ass_tmp"
                         ass_tmp_dir.mkdir(exist_ok=True)
@@ -664,6 +673,10 @@ class VideoOrchestrator:
                             "failed_clips": total - successful,
                             "title_style": self.title_style,
                             "title_overlay_enabled": True,
+                            "processed_clips": [
+                                {"filename": mp4.name, "title": _title_map.get(mp4.name, mp4.stem), "time_range": _time_range_map.get(mp4.name, '')}
+                                for mp4 in mp4s if (video_clips_post_processed_dir / mp4.name).exists()
+                            ],
                         }
                         logger.info(f"   {successful}/{total} clips post-processed (title + subtitles)")
 
@@ -671,6 +684,7 @@ class VideoOrchestrator:
                         _clips_info = clip_result.get('clips_info', [])
                         _current_clips = [c['filename'] for c in _clips_info if c.get('filename')] or None
                         _clip_titles = {c['filename']: c['title'] for c in _clips_info if c.get('filename') and c.get('title')}
+                        _clip_time_ranges = {c['filename']: c.get('time_range', '') for c in _clips_info if c.get('filename')}
                         subtitle_result = self.subtitle_burner.burn_subtitles_for_clips(
                             str(source_clips_dir), str(video_clips_post_processed_dir),
                             subtitle_translation=self.subtitle_translation,
@@ -678,6 +692,8 @@ class VideoOrchestrator:
                             clip_titles=_clip_titles,
                         )
                         subtitle_result["title_overlay_enabled"] = False
+                        for item in subtitle_result.get("processed_clips", []):
+                            item["time_range"] = _clip_time_ranges.get(item.get("filename"), "")
                         translated_by_filename = {
                             item.get("filename"): item.get("translated_subtitle_filename")
                             for item in subtitle_result.get("processed_clips", [])
@@ -714,7 +730,8 @@ class VideoOrchestrator:
                 result.cover_generation = cover_result
 
             self._refresh_editor_manifest(result, video_root_dir)
-            
+
+            result.video_root_dir = str(video_root_dir)
             result.success = True
             
             if progress_callback:
@@ -921,17 +938,44 @@ class VideoOrchestrator:
         try:
             if progress_callback:
                 progress_callback("Analyzing engaging moments...", 50)
-            
+
             highlights_files = []
-            
-            if result.was_split and result.transcript_parts:
-                # Analyze each part separately
+
+            # Per-segment parallel analysis (long_video_acceleration mode)
+            segment_paths = getattr(result, 'segment_srt_paths', None)
+            if segment_paths:
+                logger.info(f"🔍 Analyzing {len(segment_paths)} segments in parallel (concurrency=10)...")
+                sem = asyncio.Semaphore(10)
+                transcript_dir = Path(segment_paths[0]).parent
+
+                async def _analyze_segment(idx: int, srt_path: str) -> str:
+                    async with sem:
+                        part_name = f"seg{idx:03d}"
+                        t0 = _time.time()
+                        highlights = await self.engaging_moments_analyzer.analyze_part_for_engaging_moments(
+                            srt_path, part_name
+                        )
+                        elapsed = _time.time() - t0
+                        n_moments = len(highlights.get('engaging_moments', []))
+                        logger.info(f"⏱️  Segment {part_name} analysis: {elapsed:.1f}s → {n_moments} moments")
+                        highlights_file = transcript_dir / f"highlights_{part_name}.json"
+                        await self.engaging_moments_analyzer.save_highlights_to_file(highlights, str(highlights_file))
+                        return str(highlights_file)
+
+                highlights_files = await asyncio.gather(
+                    *[_analyze_segment(i, p) for i, p in enumerate(segment_paths)]
+                )
+                highlights_files = list(highlights_files)
+
+                if progress_callback:
+                    progress_callback(f"Analyzed {len(segment_paths)} segments", 60)
+
+            elif result.was_split and result.transcript_parts:
+                # Analyze each part separately (legacy chunked mode)
                 logger.info(f"🔍 Analyzing {len(result.transcript_parts)} video parts...")
 
                 for i, transcript_path in enumerate(result.transcript_parts):
                     part_name = f"part{i+1:02d}"
-
-                    # Analyze this part
                     t0 = _time.time()
                     highlights = await self.engaging_moments_analyzer.analyze_part_for_engaging_moments(
                         transcript_path, part_name
@@ -940,7 +984,6 @@ class VideoOrchestrator:
                     n_moments = len(highlights.get('engaging_moments', []))
                     logger.info(f"⏱️  Part {part_name} analysis: {elapsed:.1f}s → {n_moments} moments found")
 
-                    # Save highlights for this part
                     transcript_dir = Path(transcript_path).parent
                     highlights_file = transcript_dir / f"highlights_{part_name}.json"
                     await self.engaging_moments_analyzer.save_highlights_to_file(highlights, str(highlights_file))
@@ -950,26 +993,6 @@ class VideoOrchestrator:
                         progress = 50 + (i + 1) * 10 / len(result.transcript_parts)
                         progress_callback(f"Analyzed part {i+1}/{len(result.transcript_parts)}", progress)
 
-                # Aggregate top moments
-                logger.info(f"🔄 Aggregating top {self.engaging_moments_analyzer.max_clips} engaging moments...")
-                t0 = _time.time()
-                top_moments = await self.engaging_moments_analyzer.aggregate_top_moments(
-                    highlights_files, str(transcript_dir)
-                )
-                elapsed = _time.time() - t0
-                n_top = len(top_moments.get('top_engaging_moments', []))
-                logger.info(f"⏱️  Aggregation: {elapsed:.1f}s → {n_top} top moments selected")
-                
-                # Save aggregated results
-                aggregated_file = transcript_dir / "top_engaging_moments.json"
-                await self.engaging_moments_analyzer.save_highlights_to_file(top_moments, str(aggregated_file))
-                
-                return {
-                    'highlights_files': highlights_files,
-                    'aggregated_file': str(aggregated_file),
-                    'top_moments': top_moments,
-                    'total_parts_analyzed': len(result.transcript_parts)
-                }
             else:
                 logger.warning("No transcript available for engaging moments analysis")
                 return {
@@ -978,6 +1001,35 @@ class VideoOrchestrator:
                     'top_moments': None,
                     'total_parts_analyzed': 0
                 }
+
+            # Aggregate top moments
+            if not highlights_files:
+                return {
+                    'highlights_files': [],
+                    'aggregated_file': None,
+                    'top_moments': None,
+                    'total_parts_analyzed': 0
+                }
+
+            transcript_dir = Path(highlights_files[0]).parent
+            logger.info(f"🔄 Aggregating top {self.engaging_moments_analyzer.max_clips} engaging moments...")
+            t0 = _time.time()
+            top_moments = await self.engaging_moments_analyzer.aggregate_top_moments(
+                highlights_files, str(transcript_dir)
+            )
+            elapsed = _time.time() - t0
+            n_top = len(top_moments.get('top_engaging_moments', []))
+            logger.info(f"⏱️  Aggregation: {elapsed:.1f}s → {n_top} top moments selected")
+
+            aggregated_file = transcript_dir / "top_engaging_moments.json"
+            await self.engaging_moments_analyzer.save_highlights_to_file(top_moments, str(aggregated_file))
+
+            return {
+                'highlights_files': highlights_files,
+                'aggregated_file': str(aggregated_file),
+                'top_moments': top_moments,
+                'total_parts_analyzed': len(highlights_files)
+            }
                 
         except Exception as e:
             logger.error(f"Error in engaging moments analysis: {e}")
