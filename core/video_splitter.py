@@ -390,7 +390,7 @@ class VideoSplitter:
         video_parts, transcript_parts = VideoFileManager.find_video_parts(splits_dir, base_name)
         
         logger.info(f"✅ Split into {len(video_parts)} video parts and {len(transcript_parts)} transcript parts")
-        
+
         return {
             'video_parts': video_parts,
             'transcript_parts': transcript_parts,
@@ -400,6 +400,45 @@ class VideoSplitter:
                 for start_time in [split_point[0]]
             },
         }
+
+    async def split_video_parallel(self, video_path: str, duration_minutes: float, output_dir: str) -> List[str]:
+        """Split video into parts using parallel ffmpeg -c copy calls."""
+        import asyncio
+        import json as _json
+
+        os.makedirs(output_dir, exist_ok=True)
+        base_name = os.path.splitext(os.path.basename(video_path))[0]
+
+        cmd = [
+            'ffprobe', '-v', 'quiet', '-print_format', 'json', '-show_format', video_path
+        ]
+        result = subprocess.run(cmd, capture_output=True, text=True, check=True)
+        total_duration = float(_json.loads(result.stdout)['format']['duration'])
+
+        duration_seconds = duration_minutes * 60
+        split_points = []
+        current_start = 0.0
+        while current_start < total_duration:
+            end_time = min(current_start + duration_seconds, total_duration)
+            split_points.append((current_start, end_time - current_start))
+            current_start = end_time
+
+        video_parts = []
+        for i, (start, dur) in enumerate(split_points, 1):
+            output = os.path.join(output_dir, f"{base_name}_part{i:02d}.mp4")
+            video_parts.append(output)
+
+        async def _split_one(start, dur, output):
+            await asyncio.to_thread(self.split_video_ffmpeg, video_path, start, dur, output)
+
+        await asyncio.gather(*[
+            _split_one(start, dur, out)
+            for (start, dur), out in zip(split_points, video_parts)
+        ])
+
+        self.last_split_points = [(s, s + d) for s, d in split_points]
+        logger.info(f"✅ Parallel split: {len(video_parts)} parts")
+        return video_parts
 
 
 def main():

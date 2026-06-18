@@ -188,6 +188,21 @@ AUDIO_ENERGY_CONFIG: dict = {
     "fallback_top_n": 5,
 }
 
+# Parallel ASR configuration (non-accelerated mode)
+ASR_SEGMENT_MINUTES: float = _env_float("ASR_SEGMENT_MINUTES", 5.0)
+ASR_OVERLAP_SECONDS: float = _env_float("ASR_OVERLAP_SECONDS", 5.0)
+ASR_PARALLEL_WORKERS: int = _env_int("ASR_PARALLEL_WORKERS", 3)
+
+# LLM analysis chunking
+LLM_ANALYSIS_CHUNK_MINUTES: float = _env_float("LLM_ANALYSIS_CHUNK_MINUTES", 2.0)
+LLM_ANALYSIS_OVERLAP_SECONDS: float = _env_float("LLM_ANALYSIS_OVERLAP_SECONDS", 30.0)
+MAX_CONCURRENT_LLM_ANALYSES: int = _env_int("MAX_CONCURRENT_LLM_ANALYSES", 5)
+
+# ASR backend: "whisper" (local, default) or "llm" (API-based, faster)
+ASR_BACKEND: str = os.getenv("ASR_BACKEND", "whisper")
+ASR_LLM_MODEL: str = os.getenv("ASR_LLM_MODEL", "gpt-5.5")
+ASR_LLM_PARALLEL_WORKERS: int = _env_int("ASR_LLM_PARALLEL_WORKERS", 5)
+
 # Skip download by default (use existing files if available)
 SKIP_DOWNLOAD: bool = False
 

@@ -184,6 +184,24 @@ class CustomOpenAIAPIClient:
             )
         return content
 
+    def audio_transcribe(self, audio_b64: str, audio_format: str = "mp3",
+                         model: Optional[str] = None, language: Optional[str] = None) -> str:
+        """Transcribe audio via audio-capable model. Returns SRT-formatted text."""
+        model = model or self.default_model
+        lang_hint = f" The audio language is {language}." if language else ""
+        prompt = (
+            f"Transcribe this audio precisely into SRT subtitle format.{lang_hint} "
+            "Output ONLY valid SRT content (numbered blocks with timestamps and text). "
+            "Use format: HH:MM:SS,mmm --> HH:MM:SS,mmm. Do not add any other text."
+        )
+        content = [
+            {"type": "text", "text": prompt},
+            {"type": "input_audio", "input_audio": {"data": audio_b64, "format": audio_format}},
+        ]
+        messages = [CustomOpenAIMessage(role="user", content=content)]
+        response = self.chat_completion(messages, model=model, max_tokens=16384, temperature=0.0)
+        return self._extract_content(response["choices"][0]["message"])
+
     def vision_chat(self, prompt: str, images: List[str], model: Optional[str] = None) -> str:
         """Send text + base64 images to vision-capable model."""
         model = model or self.default_model

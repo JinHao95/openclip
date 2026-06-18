@@ -170,6 +170,10 @@ function App() {
   const activePartStart = activeClip?.partAbsoluteStart ?? 0
   const activePartEnd = activeClip?.partAbsoluteEnd ?? draftProject.totalDuration
   const outputDuration = activeClip ? (activeClip.end - activeClip.start) / Math.max(activeClip.speed, 0.001) : 0
+  const TIMELINE_PADDING_SECONDS = 120
+  const timelineViewStart = Math.max(0, (activeClip?.start ?? 0) - TIMELINE_PADDING_SECONDS)
+  const timelineViewEnd = Math.min(draftProject.totalDuration, (activeClip?.end ?? 0) + TIMELINE_PADDING_SECONDS)
+  const timelineViewDuration = timelineViewEnd - timelineViewStart
   const dirtyClipCount = draftProject.clips.filter((clip) => {
     const savedClip = savedClipMap.get(clip.id)
     return savedClip ? getDirtyState(savedClip, clip).hasChanges || Boolean(clip.coverDirty) : false
@@ -263,12 +267,12 @@ function App() {
 
     function handlePointerMove(event: PointerEvent) {
       const rect = timelineTrackRef.current?.getBoundingClientRect()
-      if (!rect || draftProject.totalDuration <= 0) {
+      if (!rect || timelineViewDuration <= 0) {
         return
       }
 
       const ratio = Math.min(Math.max((event.clientX - rect.left) / rect.width, 0), 1)
-      const nextSeconds = ratio * draftProject.totalDuration
+      const nextSeconds = timelineViewStart + ratio * timelineViewDuration
       const clamped = dragHandle === 'start'
         ? clampBoundsWithinRange(nextSeconds, activeClip.end, draftProject.totalDuration, activePartStart, activePartEnd ?? draftProject.totalDuration)
         : clampBoundsWithinRange(activeClip.start, nextSeconds, draftProject.totalDuration, activePartStart, activePartEnd ?? draftProject.totalDuration)
@@ -290,7 +294,7 @@ function App() {
       window.removeEventListener('pointermove', handlePointerMove)
       window.removeEventListener('pointerup', handlePointerUp)
     }
-  }, [activeClip, activePartEnd, activePartStart, dragHandle, draftProject.totalDuration])
+  }, [activeClip, activePartEnd, activePartStart, dragHandle, draftProject.totalDuration, timelineViewStart, timelineViewDuration])
 
   useEffect(() => {
     if (!previewVideoRef.current || !previewWindow) {
@@ -631,8 +635,8 @@ function App() {
     return <div className="shell"><main className="workspace-grid"><p>{t(locale, 'noClipsAvailable')}</p></main></div>
   }
 
-  const timelineStart = draftProject.totalDuration > 0 ? (activeClip.start / draftProject.totalDuration) * 100 : 0
-  const timelineWidth = draftProject.totalDuration > 0 ? ((activeClip.end - activeClip.start) / draftProject.totalDuration) * 100 : 0
+  const timelineStart = timelineViewDuration > 0 ? ((activeClip.start - timelineViewStart) / timelineViewDuration) * 100 : 0
+  const timelineWidth = timelineViewDuration > 0 ? ((activeClip.end - activeClip.start) / timelineViewDuration) * 100 : 0
   const previewSourceUrl = previewWindow?.sourceVideoUrl ?? activeClip.sourceVideoUrl ?? draftProject.sourceVideoUrl
   const diagnosticsStatusKind = loading ? 'loading' : loadError ? 'error' : 'connected'
   const diagnosticsStatus = loading ? t(locale, 'loadingStatus') : loadError ? t(locale, 'errorStatus') : t(locale, 'connectedStatus')
@@ -790,8 +794,9 @@ function App() {
             <div className="timeline-shell">
               <div className="timeline-shell__track" aria-hidden="true" ref={timelineTrackRef}>
                 {draftProject.clips.map((clip) => {
-                  const left = draftProject.totalDuration > 0 ? (clip.start / draftProject.totalDuration) * 100 : 0
-                  const width = draftProject.totalDuration > 0 ? ((clip.end - clip.start) / draftProject.totalDuration) * 100 : 0
+                  if (clip.end < timelineViewStart || clip.start > timelineViewEnd) return null
+                  const left = timelineViewDuration > 0 ? ((clip.start - timelineViewStart) / timelineViewDuration) * 100 : 0
+                  const width = timelineViewDuration > 0 ? ((clip.end - clip.start) / timelineViewDuration) * 100 : 0
                   return (
                     <div
                       key={clip.id}
@@ -809,13 +814,14 @@ function App() {
                 </div>
               </div>
               <div className="timeline-shell__controls">
-                <label><span>{t(locale, 'start')}</span><input aria-label={t(locale, 'clipStart')} type="range" min={activePartStart} max={Math.max((activePartEnd ?? draftProject.totalDuration) - 0.1, activePartStart + 0.1)} step={0.1} value={activeClip.start} disabled={loading} onChange={(event) => updateBoundsLocally(Number(event.currentTarget.value), activeClip.end)} /><output>{formatTimestamp(activeClip.start)}</output></label>
-                <label><span>{t(locale, 'end')}</span><input aria-label={t(locale, 'clipEnd')} type="range" min={Math.min(activePartStart + 0.1, activePartEnd ?? draftProject.totalDuration)} max={Math.max(activePartEnd ?? draftProject.totalDuration, activePartStart + 0.1)} step={0.1} value={activeClip.end} disabled={loading} onChange={(event) => updateBoundsLocally(activeClip.start, Number(event.currentTarget.value))} /><output>{formatTimestamp(activeClip.end)}</output></label>
+                <label><span>{t(locale, 'start')}</span><input aria-label={t(locale, 'clipStart')} type="range" min={timelineViewStart} max={Math.max(timelineViewEnd - 0.1, timelineViewStart + 0.1)} step={0.1} value={activeClip.start} disabled={loading} onChange={(event) => updateBoundsLocally(Number(event.currentTarget.value), activeClip.end)} /><output>{formatTimestamp(activeClip.start)}</output></label>
+                <label><span>{t(locale, 'end')}</span><input aria-label={t(locale, 'clipEnd')} type="range" min={Math.min(timelineViewStart + 0.1, timelineViewEnd)} max={Math.max(timelineViewEnd, timelineViewStart + 0.1)} step={0.1} value={activeClip.end} disabled={loading} onChange={(event) => updateBoundsLocally(activeClip.start, Number(event.currentTarget.value))} /><output>{formatTimestamp(activeClip.end)}</output></label>
               </div>
               <div className="timeline-shell__summary">
                 <article><span>{t(locale, 'candidateClip')}</span><strong>{formatTimestamp(activeClip.start)} → {formatTimestamp(activeClip.end)}</strong></article>
                 <article><span>{t(locale, 'duration')}</span><strong>{formatTimestamp(outputDuration)}</strong></article>
                 <article><span>{t(locale, 'partLocalDebug')}</span><strong>{formatTimestamp(activeClip.localStart)} → {formatTimestamp(activeClip.localEnd)}</strong></article>
+                <article><span>{locale === 'zh' ? '可视范围' : 'Visible range'}</span><strong>{formatTimestamp(timelineViewStart)} → {formatTimestamp(timelineViewEnd)}</strong></article>
                 <article><span>{t(locale, 'coverState')}</span><strong>{activeDirtyState.coverNeedsRefresh ? t(locale, 'needsRerender') : t(locale, 'currentAssetsUsable')}</strong></article>
               </div>
               {previewSourceUrl ? (

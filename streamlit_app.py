@@ -49,6 +49,7 @@ from core.downloaders.bilibili_downloader import ImprovedBilibiliDownloader
 # Import job manager for background processing
 from job_manager import get_job_manager, JobStatus
 from core.upload_staging import (
+    OWNER_SESSION_QUERY_PARAM,
     SOURCE_KIND_SERVER_PATH,
     SOURCE_KIND_UPLOADED_FILE,
     SOURCE_KIND_URL,
@@ -205,6 +206,8 @@ TRANSLATIONS = {
         'use_custom_prompt': 'Use Custom Highlight Analysis Prompt',
         'force_whisper': 'Force Local ASR Subtitles',
         'force_whisper_help': 'Ignore downloaded subtitles and generate a fresh local transcript.',
+        'asr_backend': 'ASR Engine',
+        'asr_backend_help': 'Choose speech recognition engine: local Whisper (free, slow) or LLM API (fast, costs tokens).',
         'long_video_acceleration': '⚡ Long Video Acceleration',
         'long_video_acceleration_help': 'Performs audio energy analysis first to identify exciting moments (commentary spikes, crowd roars), then only transcribes those segments. Best for sports, live events, and content with clear emotional peaks.',
         'generate_clips': 'Generate Clips',
@@ -327,6 +330,8 @@ TRANSLATIONS = {
         'override_analysis_prompt_help': '完全替换默认分析提示词。适合想完全控制LLM分析方式的开发者。',
         'use_custom_prompt': '使用自定义高光分析提示词',
         'force_whisper': '强制使用本地 ASR 生成字幕',
+        'asr_backend': 'ASR 引擎',
+        'asr_backend_help': '选择语音识别引擎：本地 Whisper（免费但慢）或 LLM API（快速，消耗 token）。',
         'long_video_acceleration': '⚡ 长视频加速',
         'long_video_acceleration_help': '先进行音频能量分析，识别解说激动/观众欢呼等高能量片段，仅对候选片段做语音转写。适合体育赛事、直播回放等有明显情绪波动的视频。',
         'generate_clips': '生成高光片段',
@@ -452,6 +457,7 @@ DEFAULT_DATA = {
     'use_background': False,
     'use_custom_prompt': False,
     'force_whisper': False,
+    'asr_backend': 'whisper',
     'long_video_acceleration': False,
     'generate_clips': True,
     'max_clips': MAX_CLIPS,
@@ -582,6 +588,10 @@ if not st.session_state[PREFERENCES_HYDRATED_FLAG]:
     st.session_state[PREFERENCES_HYDRATED_FLAG] = True
     if payload is not None:
         st.session_state.browser_data = merge_browser_preferences(DEFAULT_DATA, st.session_state.browser_data, payload)
+        # Restore owner session ID from cookie if available
+        saved_oc_session = (payload.get("prefs") or {}).get("oc_session")
+        if saved_oc_session:
+            st.session_state[OWNER_SESSION_QUERY_PARAM] = saved_oc_session
         st.session_state['remembered_preferences_payload'] = raw_preferences_cookie
         st.session_state['suspend_preference_writeback'] = False
     else:
@@ -1256,6 +1266,16 @@ with st.sidebar:
         )
         data['force_whisper'] = force_whisper
 
+        asr_backend_options = ["whisper", "llm"]
+        asr_backend = st.selectbox(
+            t['asr_backend'],
+            options=asr_backend_options,
+            index=asr_backend_options.index(data.get('asr_backend', 'whisper')),
+            help=t['asr_backend_help'],
+            key=f"asr_backend_{st.session_state.reset_counter}",
+        )
+        data['asr_backend'] = asr_backend
+
         long_video_acceleration = st.checkbox(
             t['long_video_acceleration'],
             value=data.get('long_video_acceleration', False),
@@ -1310,6 +1330,8 @@ with st.sidebar:
     
     if st.session_state[PREFERENCES_HYDRATED_FLAG]:
         preferences_payload = build_preferences_payload(data)
+        # Inject oc_session into preferences so it persists across restarts
+        preferences_payload.setdefault("prefs", {})["oc_session"] = current_owner_session_id
         default_preferences_payload = build_preferences_payload(reset_browser_state(DEFAULT_DATA))
         if st.session_state['suspend_preference_writeback']:
             if preferences_payload != default_preferences_payload:
@@ -1412,6 +1434,7 @@ def process_video_worker(job, progress_callback):
     result = asyncio.run(orchestrator.process_video(
         job.video_source,
         force_whisper=options['force_whisper'],
+        asr_backend=options.get('asr_backend', 'whisper'),
         skip_download=False,
         progress_callback=progress_callback,
     ))
@@ -1734,6 +1757,7 @@ if process_clicked:
             'max_clips': max_clips,
             'clip_length_preset': clip_length_preset,
             'force_whisper': force_whisper,
+            'asr_backend': asr_backend,
             'long_video_acceleration': long_video_acceleration,
             'cookie_mode': cookie_mode,
             'cookies_file': (cookies_file or None) if cookie_mode == 'file' else None,

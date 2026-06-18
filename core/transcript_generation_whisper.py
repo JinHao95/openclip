@@ -8,13 +8,20 @@ import re
 import subprocess
 import sys
 import os
+import base64
 import asyncio
 import logging
 import threading
 from pathlib import Path
 from typing import Optional, Dict, List, Callable, Any
 import whisper
-from core.config import WHISPER_MODEL, TRANSCRIPT_LANGUAGE_DETECT_MODEL
+from core.config import (
+    WHISPER_MODEL, TRANSCRIPT_LANGUAGE_DETECT_MODEL,
+    ASR_SEGMENT_MINUTES, ASR_OVERLAP_SECONDS, ASR_PARALLEL_WORKERS,
+    ASR_BACKEND, ASR_LLM_MODEL, ASR_LLM_PARALLEL_WORKERS,
+    LLM_ANALYSIS_CHUNK_MINUTES, LLM_ANALYSIS_OVERLAP_SECONDS,
+    API_KEY_ENV_VARS, LLM_CONFIG,
+)
 from core.transcript_generation_paraformer import ParaformerTranscriptProcessor
 
 logger = logging.getLogger(__name__)
@@ -442,6 +449,318 @@ class TranscriptProcessor:
                 f.write(f"{i}\n")
                 f.write(f"{entry['start']} --> {entry['end']}\n")
                 f.write(f"{entry['text']}\n\n")
+
+    @staticmethod
+    def _srt_time_to_ms(t: str) -> int:
+        h, m, rest = t.split(":")
+        s, ms = rest.split(",")
+        return int(h) * 3600000 + int(m) * 60000 + int(s) * 1000 + int(ms)
+
+    @staticmethod
+    def _ms_to_srt_time(ms: int) -> str:
+        ms = max(0, ms)
+        h = ms // 3600000
+        m = (ms % 3600000) // 60000
+        s = (ms % 60000) // 1000
+        r = ms % 1000
+        return f"{h:02d}:{m:02d}:{s:02d},{r:03d}"
+
+    def _merge_overlapping_entries(self, all_entries: List[Dict]) -> List[Dict]:
+        """Merge ASR entries from overlapping segments, deduplicating at boundaries."""
+        if not all_entries:
+            return []
+        sorted_entries = sorted(all_entries, key=lambda e: self._srt_time_to_ms(e['start']))
+        merged = [sorted_entries[0]]
+        for entry in sorted_entries[1:]:
+            prev = merged[-1]
+            if abs(self._srt_time_to_ms(entry['start']) - self._srt_time_to_ms(prev['start'])) < 1000:
+                if len(entry.get('text', '')) > len(prev.get('text', '')):
+                    merged[-1] = entry
+            else:
+                merged.append(entry)
+        return merged
+
+    def split_srt_for_analysis(
+        self,
+        srt_path: str,
+        chunk_minutes: float = None,
+        overlap_seconds: float = None,
+    ) -> List[Dict[str, Any]]:
+        """Split SRT into time-based chunks with context overlap for LLM analysis.
+
+        Returns list of dicts with keys:
+            srt_path: path to chunk SRT file (includes context entries with markers)
+            target_start: start of target range (seconds)
+            target_end: end of target range (seconds)
+        """
+        if chunk_minutes is None:
+            chunk_minutes = LLM_ANALYSIS_CHUNK_MINUTES
+        if overlap_seconds is None:
+            overlap_seconds = LLM_ANALYSIS_OVERLAP_SECONDS
+
+        entries = self._parse_and_offset_srt(srt_path, 0.0)
+        if not entries:
+            return []
+
+        last_entry_ms = self._srt_time_to_ms(entries[-1]['end'])
+        total_duration_s = last_entry_ms / 1000.0
+        chunk_sec = chunk_minutes * 60
+
+        num_chunks = max(1, int(total_duration_s / chunk_sec) + (1 if total_duration_s % chunk_sec > 0 else 0))
+        srt_dir = Path(srt_path).parent
+        srt_stem = Path(srt_path).stem
+
+        chunks = []
+        for i in range(num_chunks):
+            target_start = i * chunk_sec
+            target_end = min((i + 1) * chunk_sec, total_duration_s)
+            context_start = max(0, target_start - overlap_seconds)
+            context_end = min(total_duration_s, target_end + overlap_seconds)
+
+            chunk_entries = []
+            for entry in entries:
+                entry_start_ms = self._srt_time_to_ms(entry['start'])
+                entry_start_s = entry_start_ms / 1000.0
+                if entry_start_s < context_start:
+                    continue
+                if entry_start_s >= context_end:
+                    break
+                e = dict(entry)
+                if entry_start_s < target_start:
+                    e['_context'] = 'before'
+                elif entry_start_s >= target_end:
+                    e['_context'] = 'after'
+                chunk_entries.append(e)
+
+            chunk_srt_path = str(srt_dir / f"{srt_stem}_chunk{i:03d}.srt")
+            self._write_srt_with_context(chunk_entries, chunk_srt_path, target_start, target_end)
+
+            chunks.append({
+                'srt_path': chunk_srt_path,
+                'target_start': target_start,
+                'target_end': target_end,
+            })
+
+        logger.info(f"📋 Split SRT into {num_chunks} analysis chunks ({chunk_minutes}min, {overlap_seconds}s overlap)")
+        return chunks
+
+    def _write_srt_with_context(
+        self, entries: List[Dict], output_path: str, target_start: float, target_end: float
+    ):
+        """Write SRT file with context markers for LLM analysis."""
+        with open(output_path, "w", encoding="utf-8") as f:
+            wrote_before_marker = False
+            wrote_target_marker = False
+            wrote_after_marker = False
+            idx = 1
+            for entry in entries:
+                ctx = entry.get('_context')
+                if ctx == 'before' and not wrote_before_marker:
+                    f.write(f"[CONTEXT: 前文参考，请勿在此范围产出高光]\n\n")
+                    wrote_before_marker = True
+                elif ctx is None and not wrote_target_marker:
+                    ts = self._ms_to_srt_time(int(target_start * 1000))
+                    te = self._ms_to_srt_time(int(target_end * 1000))
+                    f.write(f"[TARGET: 分析目标范围 {ts} - {te}，请在此范围内识别高光]\n\n")
+                    wrote_target_marker = True
+                elif ctx == 'after' and not wrote_after_marker:
+                    f.write(f"[CONTEXT: 后文参考，请勿在此范围产出高光]\n\n")
+                    wrote_after_marker = True
+                f.write(f"{idx}\n")
+                f.write(f"{entry['start']} --> {entry['end']}\n")
+                f.write(f"{entry['text']}\n\n")
+                idx += 1
+
+    async def process_transcripts_parallel(
+        self,
+        video_path: str,
+        output_dir: str,
+        progress_callback: Optional[Callable[[str, float], None]] = None,
+        asr_backend: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """Full-video parallel transcription: split into overlapping 5min segments, ASR in parallel."""
+        from concurrent.futures import ThreadPoolExecutor, as_completed
+        import tempfile
+        import shutil
+        import json
+
+        video_path = str(video_path)
+        output_dir = Path(output_dir)
+        output_dir.mkdir(parents=True, exist_ok=True)
+        video_stem = Path(video_path).stem
+
+        duration = self._get_video_duration(video_path)
+        if duration <= 0:
+            raise RuntimeError(f"Cannot determine duration for {video_path}")
+
+        segment_sec = ASR_SEGMENT_MINUTES * 60
+        overlap_sec = ASR_OVERLAP_SECONDS
+        num_segments = max(1, int(duration / segment_sec) + (1 if duration % segment_sec > 0 else 0))
+
+        segments = []
+        for i in range(num_segments):
+            start = max(0, i * segment_sec - overlap_sec) if i > 0 else 0
+            end = min(duration, (i + 1) * segment_sec + overlap_sec) if i < num_segments - 1 else duration
+            segments.append({"start": start, "end": end})
+
+        use_llm_asr = (asr_backend or ASR_BACKEND) == "llm"
+        llm_client = None
+        asr_workers = ASR_PARALLEL_WORKERS
+        if use_llm_asr:
+            from core.llm.custom_openai_api_client import CustomOpenAIAPIClient
+            llm_client = CustomOpenAIAPIClient(
+                api_key=os.getenv(API_KEY_ENV_VARS["custom_openai"]),
+                base_url=LLM_CONFIG["custom_openai"]["base_url"],
+                model=ASR_LLM_MODEL,
+            )
+            asr_workers = ASR_LLM_PARALLEL_WORKERS
+
+        effective_backend = "llm" if use_llm_asr else "whisper"
+        logger.info(
+            f"🔀 Parallel ASR: {num_segments} segments × {ASR_SEGMENT_MINUTES}min "
+            f"(overlap={overlap_sec}s, workers={asr_workers}, backend={effective_backend})"
+        )
+
+        if progress_callback:
+            progress_callback(f"Extracting {num_segments} audio segments...", 30)
+
+        cancelled = threading.Event()
+        seg_work_dirs = []
+        for i, seg in enumerate(segments):
+            start, end = seg["start"], seg["end"]
+            seg_duration = end - start
+            tmpdir = tempfile.mkdtemp(prefix=f"par_seg_{i:03d}_")
+            seg_audio = Path(tmpdir) / f"seg_{i:03d}.wav"
+            cmd = [
+                "ffmpeg", "-y", "-ss", str(start), "-t", str(seg_duration),
+                "-i", video_path, "-vn", "-acodec", "pcm_s16le",
+                "-ar", "16000", "-ac", "1", str(seg_audio),
+            ]
+            subprocess.run(cmd, capture_output=True, check=True)
+            seg_work_dirs.append((i, seg, tmpdir, str(seg_audio)))
+
+        if progress_callback:
+            progress_callback(f"Audio extracted, starting parallel ASR ({asr_workers} workers)...", 33)
+
+        def _transcribe_one(item):
+            if cancelled.is_set():
+                return None
+            i, seg, tmpdir, seg_audio_path = item
+            start = seg["start"]
+            detected_language = self._detect_transcript_language(seg_audio_path)
+
+            if use_llm_asr:
+                if cancelled.is_set():
+                    shutil.rmtree(tmpdir, ignore_errors=True)
+                    return None
+                mp3_path = seg_audio_path.replace(".wav", ".mp3")
+                subprocess.run([
+                    "ffmpeg", "-y", "-i", seg_audio_path,
+                    "-acodec", "libmp3lame", "-ar", "16000", "-ac", "1", "-b:a", "64k",
+                    mp3_path,
+                ], capture_output=True, check=True)
+                if cancelled.is_set():
+                    shutil.rmtree(tmpdir, ignore_errors=True)
+                    return None
+                with open(mp3_path, "rb") as f:
+                    audio_b64 = base64.b64encode(f.read()).decode("ascii")
+                srt_text = llm_client.audio_transcribe(
+                    audio_b64, audio_format="mp3",
+                    model=ASR_LLM_MODEL, language=detected_language,
+                )
+                srt_path = str(Path(tmpdir) / f"{Path(seg_audio_path).stem}.srt")
+                with open(srt_path, "w", encoding="utf-8") as f:
+                    f.write(srt_text)
+                entries = []
+                if Path(srt_path).exists():
+                    entries = self._parse_and_offset_srt(srt_path, start)
+                    logger.info(
+                        f"✅ Segment {i+1}/{num_segments} ({start:.0f}-{seg['end']:.0f}s): "
+                        f"{len(entries)} entries via llm"
+                    )
+                shutil.rmtree(tmpdir, ignore_errors=True)
+                return (i, entries)
+
+            backend = select_transcript_backend(
+                detected_language=detected_language,
+                paraformer_available=self.paraformer_processor.is_available(),
+                use_whisperx=self.use_whisperx,
+            )
+            srt_path = None
+            if backend == "paraformer":
+                try:
+                    srt_path, _ = self.paraformer_processor.transcribe_chinese_to_srt(
+                        seg_audio_path, Path(tmpdir)
+                    )
+                except Exception:
+                    backend = "whisper"
+            if not srt_path:
+                run_whisper_cli(
+                    seg_audio_path,
+                    model_name=self.whisper_model,
+                    language=detected_language,
+                    output_format="srt",
+                    output_dir=tmpdir,
+                )
+                srt_path = str(Path(tmpdir) / f"{Path(seg_audio_path).stem}.srt")
+            entries = []
+            if srt_path and Path(srt_path).exists():
+                entries = self._parse_and_offset_srt(srt_path, start)
+                logger.info(
+                    f"✅ Segment {i+1}/{num_segments} ({start:.0f}-{seg['end']:.0f}s): "
+                    f"{len(entries)} entries via {backend}"
+                )
+            shutil.rmtree(tmpdir, ignore_errors=True)
+            return (i, entries)
+
+        all_entries_indexed = []
+        completed = 0
+        with ThreadPoolExecutor(max_workers=asr_workers) as executor:
+            futures = {executor.submit(_transcribe_one, item): item for item in seg_work_dirs}
+            for future in as_completed(futures):
+                result = future.result()
+                if result is None:
+                    continue
+                idx, entries = result
+                all_entries_indexed.append((idx, entries))
+                completed += 1
+                if progress_callback:
+                    try:
+                        pct = 33 + (completed / num_segments) * 15
+                        progress_callback(f"Transcribed {completed}/{num_segments} segments", pct)
+                    except Exception:
+                        cancelled.set()
+                        executor.shutdown(wait=False, cancel_futures=True)
+                        raise
+
+        all_entries_indexed.sort(key=lambda x: x[0])
+        all_entries = []
+        for _, entries in all_entries_indexed:
+            all_entries.extend(entries)
+
+        merged_entries = self._merge_overlapping_entries(all_entries)
+
+        merged_srt_path = str(output_dir / f"{video_stem}.srt")
+        self._write_srt(merged_entries, merged_srt_path)
+        logger.info(f"📝 Parallel ASR complete: {len(merged_entries)} entries → {merged_srt_path}")
+
+        return {
+            "source": "parallel_asr",
+            "transcript_path": merged_srt_path,
+            "transcript_parts": [merged_srt_path],
+        }
+
+    def _get_video_duration(self, video_path: str) -> float:
+        cmd = [
+            "ffprobe", "-v", "quiet", "-print_format", "compact=print_section=0:nokey=1",
+            "-show_entries", "format=duration", video_path,
+        ]
+        try:
+            result = subprocess.run(cmd, capture_output=True, text=True, check=True)
+            return float(result.stdout.strip())
+        except Exception as e:
+            logger.error(f"ffprobe duration failed: {e}")
+            return 0.0
 
     def _get_language_detector(self):
         if self._language_detector is None:

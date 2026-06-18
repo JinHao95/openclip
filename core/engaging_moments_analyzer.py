@@ -370,13 +370,7 @@ class EngagingMomentsAnalyzer:
         return "".join(prompt_parts)
 
     async def analyze_part_for_engaging_moments(self, srt_path: str, part_name: str) -> Dict[str, Any]:
-        """
-        Analyze a single video part for engaging moments.
-        When the transcript has more than CHUNK_SIZE entries, split into chunks
-        and analyze each independently, then merge results.
-        """
-        CHUNK_SIZE = 10
-
+        """Analyze a single video part for engaging moments."""
         logger.info(f"🔍 Analyzing {part_name} for engaging moments...")
 
         entries = self.parse_srt_file(srt_path)
@@ -384,37 +378,54 @@ class EngagingMomentsAnalyzer:
             logger.warning(f"No entries found in {srt_path}")
             return self._create_empty_result(part_name)
 
-        if len(entries) <= CHUNK_SIZE:
-            return await self._analyze_entries_chunk(entries, part_name, srt_path)
+        # Check if the SRT has context markers (from split_srt_for_analysis)
+        with open(srt_path, 'r', encoding='utf-8') as f:
+            raw_content = f.read()
+        if '[TARGET:' in raw_content:
+            return await self._analyze_context_marked_chunk(raw_content, entries, part_name, srt_path)
 
-        # Split into chunks and analyze each
-        chunks = [entries[i:i+CHUNK_SIZE] for i in range(0, len(entries), CHUNK_SIZE)]
-        logger.info(f"📦 Splitting {len(entries)} entries into {len(chunks)} chunks for parallel analysis")
+        return await self._analyze_entries_chunk(entries, part_name, srt_path)
 
-        tasks = [
-            self._analyze_entries_chunk(chunk, f"{part_name}_chunk{i+1:02d}", srt_path)
-            for i, chunk in enumerate(chunks)
-        ]
-        chunk_results = await asyncio.gather(*tasks)
+    async def _analyze_context_marked_chunk(
+        self, raw_content: str, entries: List[Dict[str, Any]], chunk_name: str, srt_path: str
+    ) -> Dict[str, Any]:
+        """Analyze a chunk that contains [CONTEXT]/[TARGET] markers — pass raw content to LLM."""
+        prompt_template = self.load_prompt_template("engaging_moments_part_requirement")
 
-        # Merge all moments from chunks
-        all_moments = []
-        detected_type = "entertainment"
-        for cr in chunk_results:
-            if cr.get('engaging_moments'):
-                all_moments.extend(cr['engaging_moments'])
-            if cr.get('detected_content_type'):
-                detected_type = cr['detected_content_type']
+        prompt_parts = []
+        if self.use_background and self.background_content:
+            prompt_parts.append("## Additional Background Information\n\n")
+            prompt_parts.append(self.background_content)
+            prompt_parts.append("\n\n")
 
-        logger.info(f"🔗 Merged {len(all_moments)} moments from {len(chunks)} chunks")
+        prompt_parts.append(prompt_template)
+        prompt_parts.append("\n\n")
+        prompt_parts.append(build_clip_duration_prompt_section(self.clip_duration_preference.preset))
+        if self.user_intent:
+            prompt_parts.append(f"\n\n## User Focus\n\nThe user is specifically looking for: {self.user_intent}\nPrioritize moments related to this when selecting and ranking clips.")
+        prompt_parts.append(f"\n\n## Transcript Data for {chunk_name}\n\n")
+        prompt_parts.append(raw_content)
+        prompt_parts.append("\n\nPlease analyze this transcript and identify engaging moments. "
+                           "IMPORTANT: Only output moments whose timestamps fall within the [TARGET] range.")
 
-        return {
-            "video_part": part_name,
-            "detected_content_type": detected_type,
-            "engaging_moments": all_moments,
-            "total_moments": len(all_moments),
-            "analysis_timestamp": datetime.now().isoformat(),
-        }
+        analysis_prompt = "".join(prompt_parts)
+        self._export_debug_prompt(analysis_prompt, "part_analysis", chunk_name)
+
+        try:
+            loop = asyncio.get_event_loop()
+            response = await loop.run_in_executor(
+                None, lambda: self.llm_client.simple_chat(analysis_prompt, model=self.model)
+            )
+            try:
+                result = self._extract_and_parse_json(response, chunk_name, entries)
+            except json.JSONDecodeError as e:
+                logger.error(f"Failed to parse JSON for {chunk_name}: {e}")
+                result = self._create_empty_result(chunk_name)
+        except Exception as e:
+            logger.error(f"Error calling LLM API for {chunk_name}: {e}")
+            result = self._create_empty_result(chunk_name)
+
+        return result
 
     async def _analyze_entries_chunk(self, entries: List[Dict[str, Any]], chunk_name: str, srt_path: str) -> Dict[str, Any]:
         """Analyze a single chunk of entries."""
