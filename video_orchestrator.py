@@ -378,6 +378,7 @@ class VideoOrchestrator:
                 logger.info(f"🔧 Video duration > {self.max_duration_minutes} min, using parallel ASR pipeline")
                 # New optimized path: parallel ASR on full video, then split SRT for LLM analysis
                 original_video = result.video_path
+                result.source_video_path = original_video  # preserve for clip generation
                 if progress_callback:
                     progress_callback("Starting parallel ASR...", 28)
 
@@ -577,11 +578,13 @@ class VideoOrchestrator:
                     progress_callback("Generating video clips...", 70)
 
                 # Determine video directory
-                # For long_video_acceleration, clips reference the full original video timeline
+                # For long_video_acceleration or parallel ASR, clips use absolute timestamps
+                # against the original full video
                 if self.long_video_acceleration:
                     video_dir = Path(result.source_video_path or result.video_path).parent
                 elif result.was_split and result.video_parts:
-                    video_dir = Path(result.video_parts[0]).parent
+                    original = getattr(result, 'source_video_path', None) or result.video_path
+                    video_dir = Path(original).parent
                 else:
                     video_dir = Path(result.video_path).parent
 

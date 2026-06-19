@@ -19,7 +19,7 @@ def _resolve_port(host: str, port: int) -> int:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="OpenClip editor runtime service")
-    parser.add_argument("--host", default="127.0.0.1")
+    parser.add_argument("--host", default="172.18.140.100")
     parser.add_argument("--port", type=int, default=8765)
     parser.add_argument("--projects-root", default="processed_videos")
     parser.add_argument("--jobs-dir", default="jobs")

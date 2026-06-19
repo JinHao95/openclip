@@ -152,7 +152,7 @@ def ensure_editor_service(
     *,
     projects_root: str | Path = 'processed_videos',
     jobs_dir: str | Path = 'jobs',
-    host: str = '127.0.0.1',
+    host: str = '172.18.140.100',
     open_browser: bool = False,
 ) -> str:
     normalized_projects_root = _normalized_path(projects_root)

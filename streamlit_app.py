@@ -693,7 +693,7 @@ def display_results(result):
                                     st.video(str(clip_path), width=450)
                                     time_range = clip.get('time_range', '')
                                     tags_str = ", ".join(clip.get('tags', []))
-                                    caption = f"**{clip.get('title', 'Untitled')}**"
+                                    caption = f"**#{clip.get('rank', i+1)} {clip.get('title', 'Untitled')}**"
                                     if time_range:
                                         caption += f"  \n⏱ {time_range}"
                                     if tags_str:

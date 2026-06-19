@@ -210,18 +210,20 @@ class ClipGenerator:
     
     def _find_video_file(self, video_part: str, video_dir: Path) -> Optional[str]:
         """Find video file for a given part"""
-        # Try common patterns
         patterns = [
             f"*_{video_part}.mp4",
+            f"*_{video_part}.*",
             f"{video_part}.mp4",
-            "*.mp4"  # Fallback for single video
+            f"{video_part}.*",
         ]
-        
         for pattern in patterns:
-            matches = list(video_dir.glob(pattern))
+            matches = [m for m in video_dir.glob(pattern) if m.is_file()]
             if matches:
                 return str(matches[0])
-        
+        # Fallback only when directory has exactly one video (single-file scenario)
+        all_videos = [m for m in video_dir.glob("*.mp4") if m.is_file()]
+        if len(all_videos) == 1:
+            return str(all_videos[0])
         return None
     
     def _find_subtitle_file(self, video_part: str, subtitle_dir: Path) -> Optional[str]:
@@ -383,7 +385,9 @@ class ClipGenerator:
         return 0
 
     def _parse_time_flexible(self, time_str: str) -> float:
-        """Parse time string in HH:MM:SS, MM:SS, or HH:MM:SS.mmm format to seconds."""
+        """Parse time string in HH:MM:SS, MM:SS, HH:MM:SS.mmm or HH:MM:SS,mmm format to seconds."""
+        # Normalize SRT-style comma to dot
+        time_str = time_str.replace(',', '.')
         # Handle HH:MM:SS.mmm (ffmpeg-style with dot)
         if '.' in time_str:
             main, ms = time_str.rsplit('.', 1)
