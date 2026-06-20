@@ -430,6 +430,8 @@ class VideoOrchestrator:
             full_srt = getattr(result, 'transcript_path', None)
             if not full_srt and result.transcript_parts:
                 full_srt = result.transcript_parts[0]
+            # Preserve full_srt path before overwriting transcript_parts with chunks
+            result.full_srt_path = full_srt
             if full_srt and Path(full_srt).exists():
                 analysis_chunks = self.transcript_processor.split_srt_for_analysis(
                     full_srt,
@@ -509,8 +511,8 @@ class VideoOrchestrator:
 
                 # Determine subtitle directory and full SRT path
                 subtitle_dir = None
-                full_srt_path = None
-                if result.transcript_path:
+                full_srt_path = getattr(result, 'full_srt_path', None)
+                if not full_srt_path and result.transcript_path:
                     full_srt_path = result.transcript_path
                 if result.was_split and result.transcript_parts:
                     subtitle_dir = Path(result.transcript_parts[0]).parent
@@ -998,6 +1000,30 @@ class VideoOrchestrator:
             elapsed = _time.time() - t0
             n_top = len(top_moments.get('top_engaging_moments', []))
             logger.info(f"⏱️  Aggregation: {elapsed:.1f}s → {n_top} top moments selected")
+
+            # Fine grounding: determine precise clip boundaries
+            full_srt = getattr(result, 'full_srt_path', None) or getattr(result, 'transcript_path', None)
+            if not full_srt and result.transcript_parts:
+                full_srt = result.transcript_parts[0]
+            moments_list = top_moments.get('top_engaging_moments', [])
+            if full_srt and moments_list:
+                if progress_callback:
+                    progress_callback(f"Grounding {len(moments_list)} events...", 62)
+                t0 = _time.time()
+                grounded = await self.engaging_moments_analyzer.ground_events(moments_list, full_srt)
+                elapsed = _time.time() - t0
+                logger.info(f"⏱️  Grounding: {elapsed:.1f}s → {len(grounded)}/{len(moments_list)} events grounded")
+                # Re-rank after grounding
+                for i, m in enumerate(grounded):
+                    m['rank'] = i + 1
+                    m['timing'] = {
+                        'video_part': m.get('timing', {}).get('video_part', 'unknown'),
+                        'start_time': m.get('start_time', '00:00:00'),
+                        'end_time': m.get('end_time', '00:00:00'),
+                        'duration': f"{m.get('duration_seconds', 0)}s",
+                    }
+                top_moments['top_engaging_moments'] = grounded
+                top_moments['total_moments'] = len(grounded)
 
             aggregated_file = transcript_dir / "top_engaging_moments.json"
             await self.engaging_moments_analyzer.save_highlights_to_file(top_moments, str(aggregated_file))

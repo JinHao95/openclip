@@ -216,8 +216,8 @@ class ClipGenerator:
                     'time_range': f"{effective_start_time} - {effective_end_time}",
                     'original_time_range': f"{start_time} - {end_time}",
                     'normalization_details': normalization_details,
-                    'engagement_level': moment['engagement_details'].get('engagement_level', 'N/A'),
-                    'why_engaging': moment['why_engaging'],
+                    'engagement_level': (moment.get('engagement_details') or {}).get('engagement_level', moment.get('importance', 'N/A')),
+                    'why_engaging': moment.get('why_engaging', ''),
                     'tags': moment.get('tags', []),
                     '_cover_info': cover_info,
                 }

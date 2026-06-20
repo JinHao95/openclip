@@ -14,7 +14,7 @@ from datetime import datetime
 import re
 
 from core.llm.qwen_api_client import QwenAPIClient, QwenMessage
-from core.config import LLM_CONFIG, MAX_CLIPS, API_KEY_ENV_VARS, SUPPORTED_LLM_PROVIDERS
+from core.config import LLM_CONFIG, MAX_CLIPS, API_KEY_ENV_VARS, SUPPORTED_LLM_PROVIDERS, EVENT_CLUSTER_GAP_SECONDS, GROUNDING_WINDOW_SECONDS, MAX_CONCURRENT_GROUNDINGS
 from core.clip_duration import (
     build_clip_duration_prompt_section,
     get_clip_duration_preference,
@@ -400,9 +400,8 @@ class EngagingMomentsAnalyzer:
 
         prompt_parts.append(prompt_template)
         prompt_parts.append("\n\n")
-        prompt_parts.append(build_clip_duration_prompt_section(self.clip_duration_preference.preset))
         if self.user_intent:
-            prompt_parts.append(f"\n\n## User Focus\n\nThe user is specifically looking for: {self.user_intent}\nPrioritize moments related to this when selecting and ranking clips.")
+            prompt_parts.append(f"\n\n## 用户关注点\n\n用户特别关注：{self.user_intent}\n请优先标注与此相关的时刻。")
         prompt_parts.append(f"\n\n## Transcript Data for {chunk_name}\n\n")
         prompt_parts.append(raw_content)
         prompt_parts.append("\n\nPlease analyze this transcript and identify engaging moments. "
@@ -440,9 +439,8 @@ class EngagingMomentsAnalyzer:
 
         prompt_parts.append(prompt_template)
         prompt_parts.append("\n\n")
-        prompt_parts.append(build_clip_duration_prompt_section(self.clip_duration_preference.preset))
         if self.user_intent:
-            prompt_parts.append(f"\n\n## User Focus\n\nThe user is specifically looking for: {self.user_intent}\nPrioritize moments related to this when selecting and ranking clips.")
+            prompt_parts.append(f"\n\n## 用户关注点\n\n用户特别关注：{self.user_intent}\n请优先标注与此相关的时刻。")
         prompt_parts.append(f"\n\n## Transcript Data for {chunk_name}\n\n")
         prompt_parts.append(transcript_context)
         prompt_parts.append("\n\nPlease analyze this transcript and identify engaging moments following the requirements above.")
@@ -635,8 +633,29 @@ Please fix the JSON and return ONLY the valid JSON, no explanations:
         return result
     
     def _validate_moment(self, moment: Dict[str, Any], entries: List[Dict[str, Any]]) -> bool:
-        """Validate a single engaging moment"""
-        
+        """Validate a single engaging moment (anchor_time format)"""
+
+        # Support both old (start_time/end_time) and new (anchor_time) format
+        if 'anchor_time' in moment:
+            try:
+                self.time_to_seconds(moment['anchor_time'])
+            except Exception as e:
+                logger.warning(f"Invalid anchor_time: {moment.get('anchor_time')!r}, error={e}")
+                return False
+            if 'title' not in moment:
+                logger.warning("Missing required field: title")
+                return False
+            if 'importance' not in moment:
+                moment['importance'] = 'medium'
+            if 'event_type' not in moment:
+                moment['event_type'] = 'other'
+            if 'summary' not in moment:
+                moment['summary'] = ""
+            if 'tags' not in moment:
+                moment['tags'] = []
+            return True
+
+        # Legacy format with start_time/end_time
         required_fields = ['title', 'start_time', 'end_time']
         for field in required_fields:
             if field not in moment:
@@ -699,10 +718,10 @@ Please fix the JSON and return ONLY the valid JSON, no explanations:
     
     async def aggregate_top_moments(self, highlights_files: List[str], output_dir: str) -> Dict[str, Any]:
         """
-        Aggregate engaging moments from multiple parts, sort by time, take top N.
-        No LLM call — deterministic sort by start_time.
+        Aggregate engaging moments from multiple chunks with event clustering.
+        Merges moments within EVENT_CLUSTER_GAP_SECONDS into single events.
         """
-        logger.info("🔄 Aggregating top engaging moments...")
+        logger.info("🔄 Aggregating top engaging moments with event clustering...")
 
         all_moments = []
         for file_path in highlights_files:
@@ -720,34 +739,157 @@ Please fix the JSON and return ONLY the valid JSON, no explanations:
             logger.warning("No engaging moments found to aggregate")
             return self._create_empty_aggregation_result()
 
-        all_moments.sort(key=lambda m: self.time_to_seconds(m.get('start_time', '00:00:00')))
+        # Sort by anchor_time (or start_time for legacy)
+        def _get_time(m):
+            t = m.get('anchor_time') or m.get('start_time', '00:00:00')
+            return self.time_to_seconds(t)
 
-        top_moments = all_moments[:self.max_clips]
+        all_moments.sort(key=_get_time)
+
+        # Event clustering: merge moments within gap threshold
+        clusters = []
+        current_cluster = [all_moments[0]]
+        for m in all_moments[1:]:
+            prev_time = _get_time(current_cluster[-1])
+            curr_time = _get_time(m)
+            if curr_time - prev_time <= EVENT_CLUSTER_GAP_SECONDS:
+                current_cluster.append(m)
+            else:
+                clusters.append(current_cluster)
+                current_cluster = [m]
+        clusters.append(current_cluster)
+
+        # Pick representative from each cluster (highest importance)
+        importance_rank = {'high': 3, 'medium': 2, 'low': 1}
+        deduplicated = []
+        for cluster in clusters:
+            best = max(cluster, key=lambda m: importance_rank.get(
+                m.get('importance') or m.get('engagement_details', {}).get('engagement_level', 'low'), 0
+            ))
+            deduplicated.append(best)
+
+        logger.info(f"📊 Clustered {len(all_moments)} moments → {len(deduplicated)} unique events")
+
+        top_moments = deduplicated[:self.max_clips]
         for i, moment in enumerate(top_moments):
             moment['rank'] = i + 1
-            if 'timing' not in moment:
-                moment['timing'] = {
-                    'video_part': moment.pop('_source_video_part', 'unknown'),
-                    'start_time': moment.get('start_time', '00:00:00'),
-                    'end_time': moment.get('end_time', '00:00:00'),
-                    'duration': f"{moment.get('duration_seconds', 0)}s",
-                }
-            elif '_source_video_part' in moment:
-                moment['timing']['video_part'] = moment.pop('_source_video_part')
+            moment['timing'] = {
+                'video_part': moment.pop('_source_video_part', 'unknown'),
+                'anchor_time': moment.get('anchor_time') or moment.get('start_time', '00:00:00'),
+            }
 
-        logger.info(f"✅ Aggregated {len(top_moments)} moments (sorted by time)")
+        logger.info(f"✅ Aggregated {len(top_moments)} events (clustered, sorted by time)")
         return {
             "top_engaging_moments": top_moments,
             "total_moments": len(top_moments),
             "analysis_timestamp": datetime.now().isoformat() + 'Z',
-            "aggregation_criteria": f"Time-sorted, top {self.max_clips}",
+            "aggregation_criteria": f"Clustered (gap={EVENT_CLUSTER_GAP_SECONDS}s), top {self.max_clips}",
             "analysis_summary": {
                 "highest_engagement_themes": [],
                 "total_engaging_content_time": "N/A",
-                "recommendation": "Time-based aggregation"
+                "recommendation": "Two-stage event grounding"
             },
             "honorable_mentions": []
         }
+
+    async def ground_events(self, moments: List[Dict[str, Any]], srt_path: str) -> List[Dict[str, Any]]:
+        """Fine grounding: determine precise start/end for each event using LLM."""
+        if not moments:
+            return []
+
+        entries = self.parse_srt_file(srt_path)
+        if not entries:
+            logger.warning("No SRT entries for grounding, returning moments without grounding")
+            return moments
+
+        prompt_template = self.load_prompt_template("event_grounding_requirement")
+        sem = asyncio.Semaphore(MAX_CONCURRENT_GROUNDINGS)
+
+        async def _ground_one(moment: Dict[str, Any]) -> Dict[str, Any]:
+            anchor = (moment.get('anchor_time')
+                      or (moment.get('timing') or {}).get('anchor_time')
+                      or moment.get('start_time', '00:00:00'))
+            anchor_sec = self.time_to_seconds(anchor)
+            srt_window = self._extract_srt_window(entries, anchor_sec, GROUNDING_WINDOW_SECONDS)
+            if not srt_window:
+                return moment
+
+            min_sec = self.clip_duration_preference.min_seconds
+            max_sec = self.clip_duration_preference.max_seconds
+            prompt = prompt_template.replace("{title}", moment.get('title', ''))
+            prompt = prompt.replace("{event_type}", moment.get('event_type', 'other'))
+            prompt = prompt.replace("{anchor_time}", anchor)
+            prompt = prompt.replace("{importance}", moment.get('importance', 'medium'))
+            prompt = prompt.replace("{srt_window}", srt_window)
+            window_start = self.seconds_to_time(max(0, anchor_sec - GROUNDING_WINDOW_SECONDS))
+            window_end = self.seconds_to_time(anchor_sec + GROUNDING_WINDOW_SECONDS)
+            prompt = prompt.replace("{window_start}", window_start)
+            prompt = prompt.replace("{window_end}", window_end)
+            prompt = prompt.replace("{min_duration}", str(min_sec))
+            prompt = prompt.replace("{max_duration}", str(max_sec))
+
+            async with sem:
+                try:
+                    loop = asyncio.get_event_loop()
+                    response = await loop.run_in_executor(
+                        None, lambda: self.llm_client.simple_chat(prompt, model=self.model)
+                    )
+                    grounding = self._parse_grounding_response(response)
+                    if grounding:
+                        moment['start_time'] = grounding['start_time']
+                        moment['end_time'] = grounding['end_time']
+                        moment['duration_seconds'] = grounding['duration_seconds']
+                    else:
+                        logger.warning(f"Grounding parse failed for '{moment.get('title', '')[:30]}', response: {response[:200] if response else 'empty'}")
+                except Exception as e:
+                    logger.warning(f"Grounding failed for '{moment.get('title', '')}': {e}")
+            return moment
+
+        results = await asyncio.gather(*[_ground_one(m) for m in moments])
+        # Filter out moments that failed grounding (no start_time)
+        grounded = [m for m in results if 'start_time' in m and 'end_time' in m]
+        logger.info(f"✅ Grounded {len(grounded)}/{len(moments)} events")
+        return grounded
+
+    def _extract_srt_window(self, entries: List[Dict[str, Any]], anchor_sec: float, window_sec: float) -> str:
+        """Extract SRT entries within anchor ± window_sec."""
+        start_bound = max(0, anchor_sec - window_sec)
+        end_bound = anchor_sec + window_sec
+        lines = []
+        for entry in entries:
+            try:
+                entry_start = self.time_to_seconds(entry.get('start_time') or entry.get('start', ''))
+            except Exception:
+                continue
+            if entry_start < start_bound:
+                continue
+            if entry_start > end_bound:
+                break
+            st = entry.get('start_time') or entry.get('start', '')
+            et = entry.get('end_time') or entry.get('end', '')
+            lines.append(f"{st} --> {et}\n{entry['text']}")
+        return "\n\n".join(lines)
+
+    def _parse_grounding_response(self, response: str) -> Optional[Dict[str, Any]]:
+        """Parse LLM grounding response JSON."""
+        try:
+            text = response.strip()
+            if '```' in text:
+                text = re.sub(r'```(?:json)?\s*', '', text)
+                text = text.replace('```', '').strip()
+            data = json.loads(text)
+            start = data.get('start_time')
+            end = data.get('end_time')
+            if not start or not end:
+                return None
+            start_sec = self.time_to_seconds(start)
+            end_sec = self.time_to_seconds(end)
+            duration = end_sec - start_sec
+            if duration <= 0:
+                return None
+            return {'start_time': start, 'end_time': end, 'duration_seconds': int(duration)}
+        except Exception:
+            return None
 
     def build_pre_verify_pool(self, highlights_files: List[str], pool_size: int) -> Dict[str, Any]:
         """

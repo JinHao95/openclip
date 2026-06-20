@@ -187,6 +187,11 @@ LLM_ANALYSIS_CHUNK_MINUTES: float = _env_float("LLM_ANALYSIS_CHUNK_MINUTES", 4.0
 LLM_ANALYSIS_OVERLAP_SECONDS: float = _env_float("LLM_ANALYSIS_OVERLAP_SECONDS", 45.0)
 MAX_CONCURRENT_LLM_ANALYSES: int = _env_int("MAX_CONCURRENT_LLM_ANALYSES", 5)
 
+# Event grounding (two-stage architecture)
+EVENT_CLUSTER_GAP_SECONDS: float = _env_float("EVENT_CLUSTER_GAP_SECONDS", 30.0)
+GROUNDING_WINDOW_SECONDS: float = _env_float("GROUNDING_WINDOW_SECONDS", 90.0)
+MAX_CONCURRENT_GROUNDINGS: int = _env_int("MAX_CONCURRENT_GROUNDINGS", 5)
+
 
 # Skip download by default (use existing files if available)
 SKIP_DOWNLOAD: bool = False
