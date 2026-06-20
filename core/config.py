@@ -176,22 +176,6 @@ SUBTITLE_TRANSLATION_LAUNCH_STAGGER_SECONDS: float = max(
     _env_float("SUBTITLE_TRANSLATION_LAUNCH_STAGGER_SECONDS", 0.25),
 )
 
-# Audio energy analysis for long video acceleration
-AUDIO_ENERGY_CONFIG: dict = {
-    "threshold_k": 1.5,
-    "rolling_window_seconds": 90,
-    "min_segment_seconds": 15,
-    "merge_gap_seconds": 10,
-    "context_padding_seconds": 5,
-    "min_coverage_ratio": 0.15,
-    "max_coverage_ratio": 0.40,
-    "fallback_top_n": 5,
-}
-
-# Parallel ASR configuration (non-accelerated mode)
-ASR_SEGMENT_MINUTES: float = _env_float("ASR_SEGMENT_MINUTES", 5.0)
-ASR_OVERLAP_SECONDS: float = _env_float("ASR_OVERLAP_SECONDS", 5.0)
-ASR_PARALLEL_WORKERS: int = _env_int("ASR_PARALLEL_WORKERS", 6)
 
 # ASR engine: "whisper" (CPU CLI), "whisperx" (GPU faster-whisper), "llm" (API-based)
 ASR_ENGINE: str = os.getenv("ASR_ENGINE", "whisperx")
@@ -203,10 +187,6 @@ LLM_ANALYSIS_CHUNK_MINUTES: float = _env_float("LLM_ANALYSIS_CHUNK_MINUTES", 4.0
 LLM_ANALYSIS_OVERLAP_SECONDS: float = _env_float("LLM_ANALYSIS_OVERLAP_SECONDS", 45.0)
 MAX_CONCURRENT_LLM_ANALYSES: int = _env_int("MAX_CONCURRENT_LLM_ANALYSES", 5)
 
-# ASR backend: "whisper" (local, default) or "llm" (API-based, faster)
-ASR_BACKEND: str = os.getenv("ASR_BACKEND", "whisper")
-ASR_LLM_MODEL: str = os.getenv("ASR_LLM_MODEL", "gpt-5.5")
-ASR_LLM_PARALLEL_WORKERS: int = _env_int("ASR_LLM_PARALLEL_WORKERS", 5)
 
 # Skip download by default (use existing files if available)
 SKIP_DOWNLOAD: bool = False

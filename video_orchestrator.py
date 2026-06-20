@@ -93,7 +93,6 @@ class VideoOrchestrator:
                 agentic_analysis: bool = False,
                 clip_length_preset: str = DEFAULT_CLIP_LENGTH_PRESET,
                 normalize_boundaries: bool = True,
-                long_video_acceleration: bool = False,
                 visual_verification: bool = False):
         """
         Initialize the video orchestrator
@@ -165,7 +164,6 @@ class VideoOrchestrator:
         )
         self.download_processor = DownloadProcessor(self.downloader)
 
-        self.long_video_acceleration = long_video_acceleration
         self.visual_verification = visual_verification
 
         # Initialize the appropriate analyzer based on mode
@@ -285,7 +283,6 @@ class VideoOrchestrator:
     async def process_video(self,
                           source: str,
                           force_whisper: bool = False,
-                          asr_backend: Optional[str] = None,
                           custom_filename: Optional[str] = None,
                           skip_download: bool = SKIP_DOWNLOAD,
                           skip_transcript: bool = SKIP_TRANSCRIPT,
@@ -367,81 +364,41 @@ class VideoOrchestrator:
             video_root_dir = self.output_dir / safe_video_name
             video_root_dir.mkdir(parents=True, exist_ok=True)
             
-            # Step 2: Check duration and split if needed
-            logger.info("⏱️  Step 2: Checking video duration...")
-            needs_splitting = self.video_splitter.check_duration_needs_splitting(result.video_info)
-            
+            # Step 2: Prepare splits directory
+            logger.info("⏱️  Step 2: Preparing video for processing...")
+
             splits_dir = video_root_dir / "splits"
             splits_dir.mkdir(parents=True, exist_ok=True)
 
-            if needs_splitting and not self.long_video_acceleration:
-                logger.info(f"🔧 Video duration > {self.max_duration_minutes} min, using parallel ASR pipeline")
-                # New optimized path: parallel ASR on full video, then split SRT for LLM analysis
-                original_video = result.video_path
-                result.source_video_path = original_video  # preserve for clip generation
-                if progress_callback:
-                    progress_callback("Starting parallel ASR...", 28)
+            # Treat single video as split video with one part (_part01)
+            video_file = Path(result.video_path)
+            # Add _part01 suffix to video filename
+            splits_video_name = f"{video_file.stem}_part01{video_file.suffix}"
+            splits_video = splits_dir / splits_video_name
+            if not splits_video.exists():
+                shutil.copy2(str(video_file), str(splits_video))
+                logger.info(f"📁 Copied video to splits dir as part01: {splits_video.name}")
+            # Set was_split to True and add to video_parts
+            result.was_split = True
+            result.video_parts = [str(splits_video)]
+            result.video_path = str(splits_video)
+            result.part_offsets = {"part01": 0.0}
 
-                transcript_result = await self.transcript_processor.process_transcripts_parallel(
-                    original_video, str(splits_dir), progress_callback,
-                    asr_backend=asr_backend,
-                )
-                result.transcript_source = transcript_result['source']
-                result.transcript_path = transcript_result['transcript_path']
-                result.was_split = True
-
-                # Split SRT for LLM analysis (with context overlap)
-                analysis_chunks = self.transcript_processor.split_srt_for_analysis(
-                    transcript_result['transcript_path'],
-                    chunk_minutes=LLM_ANALYSIS_CHUNK_MINUTES,
-                    overlap_seconds=LLM_ANALYSIS_OVERLAP_SECONDS,
-                )
-                result.transcript_parts = [c['srt_path'] for c in analysis_chunks]
-                result.analysis_chunks = analysis_chunks
-
-                # Parallel: video split + LLM analysis happen concurrently (done later in Step 4)
-                # For now, kick off video split in parallel with LLM analysis
-                split_coro = self.video_splitter.split_video_parallel(
-                    original_video, self.max_duration_minutes, str(splits_dir)
-                )
-                result._pending_split_coro = split_coro
-                result.part_offsets = {
-                    f"part{i+1:02d}": i * self.max_duration_minutes * 60
-                    for i in range(int(result.video_info.get('duration', 0) / (self.max_duration_minutes * 60)) + 1)
-                }
-            else:
-                # Treat single video as split video with one part (_part01)
-                video_file = Path(result.video_path)
-                # Add _part01 suffix to video filename
-                splits_video_name = f"{video_file.stem}_part01{video_file.suffix}"
-                splits_video = splits_dir / splits_video_name
-                if not splits_video.exists():
-                    shutil.copy2(str(video_file), str(splits_video))
-                    logger.info(f"📁 Copied video to splits dir as part01: {splits_video.name}")
-                # Set was_split to True and add to video_parts
-                result.was_split = True
-                result.video_parts = [str(splits_video)]
-                result.video_path = str(splits_video)
-                result.part_offsets = {"part01": 0.0}
-
-                if subtitle_path and Path(subtitle_path).exists():
-                    sub_file = Path(subtitle_path)
-                    # Add _part01 suffix to subtitle filename
-                    splits_sub_name = f"{sub_file.stem}_part01{sub_file.suffix}"
-                    splits_sub = splits_dir / splits_sub_name
-                    # Always copy to ensure we use the latest version
-                    shutil.copy2(str(sub_file), str(splits_sub))
-                    logger.info(f"📁 Copied subtitle to splits dir as part01: {splits_sub.name}")
-                    # Add subtitle to transcript_parts
-                    if not hasattr(result, 'transcript_parts'):
-                        result.transcript_parts = []
-                    result.transcript_parts.append(str(splits_sub))
+            if subtitle_path and Path(subtitle_path).exists():
+                sub_file = Path(subtitle_path)
+                # Add _part01 suffix to subtitle filename
+                splits_sub_name = f"{sub_file.stem}_part01{sub_file.suffix}"
+                splits_sub = splits_dir / splits_sub_name
+                # Always copy to ensure we use the latest version
+                shutil.copy2(str(sub_file), str(splits_sub))
+                logger.info(f"📁 Copied subtitle to splits dir as part01: {splits_sub.name}")
+                # Add subtitle to transcript_parts
+                if not hasattr(result, 'transcript_parts'):
+                    result.transcript_parts = []
+                result.transcript_parts.append(str(splits_sub))
             
             # Step 3: Handle transcript generation
-            # (Skip if parallel ASR was already done in the new pipeline above)
-            if hasattr(result, 'analysis_chunks') and result.analysis_chunks:
-                logger.info("📝 Step 3: Skipped (parallel ASR already completed in Step 2)")
-            elif skip_transcript:
+            if skip_transcript:
                 logger.info("📝 Step 3: Skipping transcript generation (--skip-transcript)")
                 existing_transcript = self._find_existing_transcript(result, video_root_dir)
                 if existing_transcript:
@@ -452,57 +409,6 @@ class VideoOrchestrator:
                         result.transcript_parts = existing_transcript['transcript_parts']
                 else:
                     raise Exception("No existing transcript found. Remove --skip-transcript to generate transcripts.")
-            elif self.long_video_acceleration:
-                logger.info("🔊 Step 3: Audio energy analysis + targeted transcription...")
-                if progress_callback:
-                    progress_callback("Analyzing audio energy levels...", 30)
-
-                from core.audio_energy_analyzer import AudioEnergyAnalyzer
-                energy_analyzer = AudioEnergyAnalyzer()
-
-                # Always analyze original full video for consistent baseline
-                full_video = result.source_video_path or result.video_path
-                t0 = _time.time()
-                energy_result = energy_analyzer.analyze(full_video)
-                elapsed = _time.time() - t0
-                logger.info(f"⏱️  Audio energy analysis: {elapsed:.1f}s")
-
-                if energy_result.fell_back_to_full or not energy_result.segments:
-                    logger.info("📝 Audio energy too uniform, falling back to full ASR")
-                    if progress_callback:
-                        progress_callback("Generating full transcript...", 35)
-                    transcript_result = await self.transcript_processor.process_transcripts(
-                        subtitle_path,
-                        result.video_path if not result.was_split else result.video_parts,
-                        force_whisper,
-                        progress_callback
-                    )
-                else:
-                    logger.info(
-                        f"🔊 Found {len(energy_result.segments)} high-energy segments "
-                        f"({energy_result.coverage_ratio:.0%} coverage), transcribing only those"
-                    )
-                    if progress_callback:
-                        progress_callback("Transcribing high-energy segments...", 35)
-                    splits_dir = video_root_dir / "splits"
-                    splits_dir.mkdir(parents=True, exist_ok=True)
-                    t0 = _time.time()
-                    transcript_result = await self.transcript_processor.process_transcripts_for_segments(
-                        energy_result.segments,
-                        full_video,
-                        str(splits_dir),
-                        progress_callback,
-                    )
-                    elapsed = _time.time() - t0
-                    logger.info(f"⏱️  Whisper transcription ({len(energy_result.segments)} segments, 8 workers): {elapsed:.1f}s")
-
-                result.transcript_source = transcript_result['source']
-                if transcript_result.get('transcript_parts'):
-                    result.transcript_parts = transcript_result['transcript_parts']
-                if transcript_result.get('transcript_path'):
-                    result.transcript_path = transcript_result['transcript_path']
-                # Store per-segment SRT paths for per-segment LLM analysis
-                result.segment_srt_paths = transcript_result.get('segment_srt_paths', [])
             else:
                 logger.info("📝 Step 3: Processing transcripts...")
                 transcript_result = await self.transcript_processor.process_transcripts(
@@ -519,7 +425,22 @@ class VideoOrchestrator:
                 # Also set transcript_path for backward compatibility
                 if transcript_result.get('transcript_path'):
                     result.transcript_path = transcript_result['transcript_path']
-            
+
+            # Step 3.5: Split transcript into analysis chunks for parallel LLM analysis
+            full_srt = getattr(result, 'transcript_path', None)
+            if not full_srt and result.transcript_parts:
+                full_srt = result.transcript_parts[0]
+            if full_srt and Path(full_srt).exists():
+                analysis_chunks = self.transcript_processor.split_srt_for_analysis(
+                    full_srt,
+                    chunk_minutes=LLM_ANALYSIS_CHUNK_MINUTES,
+                    overlap_seconds=LLM_ANALYSIS_OVERLAP_SECONDS,
+                )
+                if analysis_chunks and len(analysis_chunks) > 1:
+                    result.analysis_chunks = analysis_chunks
+                    result.transcript_parts = [c['srt_path'] for c in analysis_chunks]
+                    logger.info(f"📊 Split transcript into {len(analysis_chunks)} analysis chunks")
+
             # Step 4: Analyze engaging moments or insights (if not skipped and analyzer available)
             engaging_result = None
             analyzer_ready = (self.engaging_moments_analyzer or self.insights_analyzer) and not self.skip_analysis
@@ -580,11 +501,7 @@ class VideoOrchestrator:
                 _step5_start = _time.time()
 
                 # Determine video directory
-                # For long_video_acceleration or parallel ASR, clips use absolute timestamps
-                # against the original full video
-                if self.long_video_acceleration:
-                    video_dir = Path(result.source_video_path or result.video_path).parent
-                elif result.was_split and result.video_parts:
+                if result.was_split and result.video_parts:
                     original = getattr(result, 'source_video_path', None) or result.video_path
                     video_dir = Path(original).parent
                 else:
@@ -991,36 +908,7 @@ class VideoOrchestrator:
 
             highlights_files = []
 
-            # Per-segment parallel analysis (long_video_acceleration mode)
-            segment_paths = getattr(result, 'segment_srt_paths', None)
-            if segment_paths:
-                logger.info(f"🔍 Analyzing {len(segment_paths)} segments in parallel (concurrency=10)...")
-                sem = asyncio.Semaphore(10)
-                transcript_dir = Path(segment_paths[0]).parent
-
-                async def _analyze_segment(idx: int, srt_path: str) -> str:
-                    async with sem:
-                        part_name = f"seg{idx:03d}"
-                        t0 = _time.time()
-                        highlights = await self.engaging_moments_analyzer.analyze_part_for_engaging_moments(
-                            srt_path, part_name
-                        )
-                        elapsed = _time.time() - t0
-                        n_moments = len(highlights.get('engaging_moments', []))
-                        logger.info(f"⏱️  Segment {part_name} analysis: {elapsed:.1f}s → {n_moments} moments")
-                        highlights_file = transcript_dir / f"highlights_{part_name}.json"
-                        await self.engaging_moments_analyzer.save_highlights_to_file(highlights, str(highlights_file))
-                        return str(highlights_file)
-
-                highlights_files = await asyncio.gather(
-                    *[_analyze_segment(i, p) for i, p in enumerate(segment_paths)]
-                )
-                highlights_files = list(highlights_files)
-
-                if progress_callback:
-                    progress_callback(f"Analyzed {len(segment_paths)} segments", 60)
-
-            elif result.was_split and result.transcript_parts:
+            if result.was_split and result.transcript_parts:
                 # Check if this is parallel-ASR mode with analysis_chunks
                 analysis_chunks = getattr(result, 'analysis_chunks', None)
                 pending_split = getattr(result, '_pending_split_coro', None)

@@ -37,7 +37,6 @@ PERSISTED_TOP_LEVEL_FIELDS = {
     "mode",
     "agentic_analysis",
     "visual_verification",
-    "asr_backend",
     "oc_session",
 }
 
@@ -54,7 +53,6 @@ SAFE_ENUM_FIELDS = {
     "subtitle_style_vertical_position": {"bottom", "lower_middle", "middle"},
     "subtitle_style_background_style": {"none", "light_box", "solid_box"},
     "mode": {"engaging_moments"},
-    "asr_backend": {"whisper", "llm"},
     "clip_length_preset": set(CLIP_DURATION_PRESETS.keys()) | {"8_30", "15_30", "auto", "30_60", "60_90", "90_180", "180_300"},
 }
 

@@ -338,17 +338,7 @@ class VideoSplitter:
         print(f"\n🏁 Completed: {success_count}/{len(split_points)} parts successful")
         return success_count == len(split_points)
     
-    def check_duration_needs_splitting(self, video_info: Dict[str, Any]) -> bool:
-        """Check if video needs splitting based on duration"""
-        duration = video_info.get('duration', 0)
-        
-        if duration > self.max_duration_seconds:
-            logger.info(f"📏 Video duration: {duration/60:.1f} minutes (> {self.max_duration_minutes} min limit)")
-            return True
-        else:
-            logger.info(f"📏 Video duration: {duration/60:.1f} minutes (within {self.max_duration_minutes} min limit)")
-            return False
-    
+
     async def split_video_async(self,
                                video_path: str,
                                subtitle_path: str,
@@ -401,44 +391,6 @@ class VideoSplitter:
             },
         }
 
-    async def split_video_parallel(self, video_path: str, duration_minutes: float, output_dir: str) -> List[str]:
-        """Split video into parts using parallel ffmpeg -c copy calls."""
-        import asyncio
-        import json as _json
-
-        os.makedirs(output_dir, exist_ok=True)
-        base_name = os.path.splitext(os.path.basename(video_path))[0]
-
-        cmd = [
-            'ffprobe', '-v', 'quiet', '-print_format', 'json', '-show_format', video_path
-        ]
-        result = subprocess.run(cmd, capture_output=True, text=True, check=True)
-        total_duration = float(_json.loads(result.stdout)['format']['duration'])
-
-        duration_seconds = duration_minutes * 60
-        split_points = []
-        current_start = 0.0
-        while current_start < total_duration:
-            end_time = min(current_start + duration_seconds, total_duration)
-            split_points.append((current_start, end_time - current_start))
-            current_start = end_time
-
-        video_parts = []
-        for i, (start, dur) in enumerate(split_points, 1):
-            output = os.path.join(output_dir, f"{base_name}_part{i:02d}.mp4")
-            video_parts.append(output)
-
-        async def _split_one(start, dur, output):
-            await asyncio.to_thread(self.split_video_ffmpeg, video_path, start, dur, output)
-
-        await asyncio.gather(*[
-            _split_one(start, dur, out)
-            for (start, dur), out in zip(split_points, video_parts)
-        ])
-
-        self.last_split_points = [(s, s + d) for s, d in split_points]
-        logger.info(f"✅ Parallel split: {len(video_parts)} parts")
-        return video_parts
 
 
 def main():

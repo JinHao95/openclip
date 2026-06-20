@@ -89,11 +89,11 @@ def _show_editor_launch(editor_url: str) -> None:
     st.session_state.editor_launch_url = editor_url
     if _is_local_editor_url(editor_url):
         webbrowser.open_new_tab(editor_url)
-        st.success(f'Editor launched: {editor_url}')
+        st.success(f'编辑器已启动: {editor_url}')
     else:
-        st.success('Editor is ready.')
-        st.caption('Open the editor from this browser. The server will not open a tab for remote/LAN URLs.')
-    st.markdown(f'[Open Clip Editor]({editor_url})')
+        st.success('编辑器已就绪。')
+        st.caption('请在浏览器中打开编辑器。远程/局域网地址不会自动打开标签页。')
+    st.markdown(f'[打开片段编辑器]({editor_url})')
 
 
 async def get_bilibili_multi_parts(url: str, browser: Optional[str] = None, cookies_file: Optional[str] = None) -> list:
@@ -206,10 +206,6 @@ TRANSLATIONS = {
         'use_custom_prompt': 'Use Custom Highlight Analysis Prompt',
         'force_whisper': 'Force Local ASR Subtitles',
         'force_whisper_help': 'Ignore downloaded subtitles and generate a fresh local transcript.',
-        'asr_backend': 'ASR Engine',
-        'asr_backend_help': 'Choose speech recognition engine: local Whisper (free, slow) or LLM API (fast, costs tokens).',
-        'long_video_acceleration': '⚡ Long Video Acceleration',
-        'long_video_acceleration_help': 'Performs audio energy analysis first to identify exciting moments (commentary spikes, crowd roars), then only transcribes those segments. Best for sports, live events, and content with clear emotional peaks.',
         'generate_clips': 'Generate Clips',
         'max_clips': 'Max Clips',
         'clip_length': 'Max Clip Length',
@@ -330,10 +326,6 @@ TRANSLATIONS = {
         'override_analysis_prompt_help': '完全替换默认分析提示词。适合想完全控制LLM分析方式的开发者。',
         'use_custom_prompt': '使用自定义高光分析提示词',
         'force_whisper': '强制使用本地 ASR 生成字幕',
-        'asr_backend': 'ASR 引擎',
-        'asr_backend_help': '选择语音识别引擎：本地 Whisper（免费但慢）或 LLM API（快速，消耗 token）。',
-        'long_video_acceleration': '⚡ 长视频加速',
-        'long_video_acceleration_help': '先进行音频能量分析，识别解说激动/观众欢呼等高能量片段，仅对候选片段做语音转写。适合体育赛事、直播回放等有明显情绪波动的视频。',
         'generate_clips': '生成高光片段',
         'max_clips': '最大片段数',
         'clip_length': '片段时长上限',
@@ -457,8 +449,6 @@ DEFAULT_DATA = {
     'use_background': False,
     'use_custom_prompt': False,
     'force_whisper': False,
-    'asr_backend': 'whisperx',
-    'long_video_acceleration': False,
     'generate_clips': True,
     'max_clips': MAX_CLIPS,
     'clip_length_preset': DEFAULT_CLIP_LENGTH_PRESET,
@@ -639,21 +629,21 @@ def display_results(result):
                         moments = moments['top_engaging_moments']
                     
                     if isinstance(moments, list):
-                        st.write(f"Found {len(moments)} engaging moments")
+                        st.write(f"共发现 {len(moments)} 个精彩时刻")
                         for i, moment in enumerate(moments):
                             with st.container():
-                                st.subheader(f"Rank {i+1}: {moment.get('title', 'Untitled')}")
+                                st.subheader(f"第 {i+1} 名: {moment.get('title', '无标题')}")
                                 if 'description' in moment:
                                     st.write(moment['description'])
                                 if 'timestamp' in moment:
-                                    st.write(f"Timestamp: {moment['timestamp']}")
+                                    st.write(f"时间戳: {moment['timestamp']}")
         
         # Display clip info
         output_dir = None
         if result.clip_generation and result.clip_generation.get('success'):
             clips = result.clip_generation
-            with st.expander("🎬 Generated Clips"):
-                st.write(f"Generated {clips.get('total_clips', 0)} clips")
+            with st.expander("🎬 生成的片段"):
+                st.write(f"已生成 {clips.get('total_clips', 0)} 个片段")
                 if clips.get('clips_info'):
                     output_dir = Path(clips.get('output_dir', ''))
                     # Tag filter
@@ -662,7 +652,7 @@ def display_results(result):
                     ))
                     filtered_clips = clips['clips_info']
                     if all_tags:
-                        selected_tags = st.multiselect("🏷 Filter by tag", all_tags, default=[], key="clip_tag_filter")
+                        selected_tags = st.multiselect("🏷 按标签筛选", all_tags, default=[], key="clip_tag_filter")
                         if selected_tags:
                             filtered_clips = [c for c in filtered_clips if any(t in selected_tags for t in c.get('tags', []))]
                     # Select all / deselect all
@@ -742,8 +732,8 @@ def display_results(result):
         # Display post-processing info (titles and/or subtitles)
         if getattr(result, 'post_processing', None) and result.post_processing.get('success'):
             titles = result.post_processing
-            with st.expander("✨ Post-Processed Clips"):
-                st.write(f"Post-processed {titles.get('total_clips', 0)} clips")
+            with st.expander("✨ 后处理片段"):
+                st.write(f"已后处理 {titles.get('total_clips', 0)} 个片段")
                 post_dir = Path(titles.get('output_dir', ''))
                 if titles.get('processed_clips'):
                     clips_to_show = [
@@ -771,25 +761,25 @@ def display_results(result):
         # Display cover info
         if result.cover_generation and result.cover_generation.get('success'):
             covers = result.cover_generation
-            with st.expander("🖼️ Generated Covers"):
-                st.write(f"Generated {covers.get('total_covers', 0)} cover images")
+            with st.expander("🖼️ 生成的封面"):
+                st.write(f"已生成 {covers.get('total_covers', 0)} 张封面图")
                 if covers.get('covers'):
                     cols = st.columns(2, gap="xxsmall")
                     for i, cover in enumerate(covers['covers']):
                         cover_path = cover.get('path')
                         if cover_path and Path(cover_path).exists():
                             with cols[i % 2]:
-                                st.image(cover_path, caption=cover.get('title', 'Untitled'), width=450)
+                                st.image(cover_path, caption=cover.get('title', '无标题'), width=450)
         
         # Display output directory
         if output_dir:
-            st.info(f"📁 All outputs saved to: {output_dir}")
+            st.info(f"📁 所有输出已保存至: {output_dir}")
 
         editor_project = getattr(result, 'editor_project', None)
         if editor_project and editor_project.get('project_id'):
-            st.header('🛠️ Clip Editor')
-            st.caption('Open the post-generation editor for timeline, subtitle, and cover-title adjustments.')
-            if st.button('🛠️ Open in Editor', key=f"open_editor_{editor_project.get('project_id')}"):
+            st.header('🛠️ 片段编辑器')
+            st.caption('打开后处理编辑器，可调整时间线、字幕和封面标题。')
+            if st.button('🛠️ 打开编辑器', key=f"open_editor_{editor_project.get('project_id')}"):
                 try:
                     editor_url = ensure_editor_service(
                         editor_project['project_id'],
@@ -799,7 +789,7 @@ def display_results(result):
                     )
                     _show_editor_launch(editor_url)
                 except Exception as exc:
-                    st.warning(f'Editor unavailable: {exc}')
+                    st.warning(f'编辑器不可用: {exc}')
     else:
         st.error(f"{t['error']} {result.error_message}")
 
@@ -867,16 +857,16 @@ st.markdown(
 # Title and description
 st.title("🎬 OpenClip")
 st.markdown("""
-A lightweight automated video processing pipeline that identifies and extracts the most engaging moments from long-form videos (especially livestream recordings). Uses AI-powered analysis to find highlights, generates clips, and adds artistic titles.
+轻量级视频处理流水线，自动识别并提取长视频（特别是直播回放）中最精彩的片段。利用 AI 分析寻找高光时刻，生成短视频切片，并添加封面标题。
 """)
 
 # Sidebar for configuration
 with st.sidebar:
-    st.header("⚙️ Configuration")
-    
+    st.header("⚙️ 配置")
+
     # UI Language Selector
     ui_language = st.selectbox(
-        "UI Language",
+        "界面语言",
         options=["English", "中文"],
         index=["English", "中文"].index("中文" if current_lang == "zh" else "English"),
         help="Select language for the user interface",
@@ -1079,16 +1069,6 @@ with st.sidebar:
     )
     data['clip_length_preset'] = clip_length_preset
 
-    # User intent
-    user_intent = st.text_input(
-        t['user_intent'],
-        value=data.get('user_intent', ''),
-        placeholder=t['user_intent_placeholder'],
-        help=t['user_intent_help'],
-        key=f"user_intent_{st.session_state.reset_counter}"
-    )
-    data['user_intent'] = user_intent
-
     # Output directory
     output_dir = st.text_input(
         t['output_dir'],
@@ -1239,6 +1219,16 @@ with st.sidebar:
         data['subtitle_style_background_style'] = 'none'
 
     with st.expander(t['advanced_options']):
+        # User intent
+        user_intent = st.text_input(
+            t['user_intent'],
+            value=data.get('user_intent', ''),
+            placeholder=t['user_intent_placeholder'],
+            help=t['user_intent_help'],
+            key=f"user_intent_{st.session_state.reset_counter}"
+        )
+        data['user_intent'] = user_intent
+
         add_titles = st.checkbox(
             t['add_titles'],
             value=data['add_titles'],
@@ -1265,24 +1255,6 @@ with st.sidebar:
             key=f"force_whisper_{st.session_state.reset_counter}"
         )
         data['force_whisper'] = force_whisper
-
-        asr_backend_options = ["whisperx", "whisper", "llm"]
-        asr_backend = st.selectbox(
-            t['asr_backend'],
-            options=asr_backend_options,
-            index=asr_backend_options.index(data.get('asr_backend', 'whisperx')),
-            help=t['asr_backend_help'],
-            key=f"asr_backend_{st.session_state.reset_counter}",
-        )
-        data['asr_backend'] = asr_backend
-
-        long_video_acceleration = st.checkbox(
-            t['long_video_acceleration'],
-            value=data.get('long_video_acceleration', False),
-            help=t['long_video_acceleration_help'],
-            key=f"long_video_acceleration_{st.session_state.reset_counter}"
-        )
-        data['long_video_acceleration'] = long_video_acceleration
 
         use_custom_prompt = st.checkbox(
             t['override_analysis_prompt'],
@@ -1427,14 +1399,12 @@ def process_video_worker(job, progress_callback):
         user_intent=options.get('user_intent') or None,
         agentic_analysis=options.get('agentic_analysis', False),
         normalize_boundaries=options.get('normalize_boundaries', True),
-        long_video_acceleration=options.get('long_video_acceleration', False),
         visual_verification=options.get('visual_verification', False),
     )
     
     result = asyncio.run(orchestrator.process_video(
         job.video_source,
         force_whisper=options['force_whisper'],
-        asr_backend=options.get('asr_backend') or None,
         skip_download=False,
         progress_callback=progress_callback,
     ))
@@ -1531,10 +1501,10 @@ def render_runtime_dashboard():
     if jobs:
         stats = job_manager.get_stats(owner_session_id=current_owner_session_id)
         col1, col2, col3, col4 = st.columns(4)
-        col1.metric("Total", stats['total'])
-        col2.metric("Processing", stats['processing'])
-        col3.metric("Completed", stats['completed'])
-        col4.metric("Failed", stats['failed'])
+        col1.metric("总计", stats['total'])
+        col2.metric("处理中", stats['processing'])
+        col3.metric("已完成", stats['completed'])
+        col4.metric("失败", stats['failed'])
 
         st.divider()
 
@@ -1554,13 +1524,13 @@ def render_runtime_dashboard():
                 col1, col2, col3 = st.columns([2, 2, 1])
 
                 with col1:
-                    st.write(f"**Job ID:** `{job.id[:8]}...`")
-                    st.write(f"**Created:** {job.created_at.strftime('%Y-%m-%d %H:%M:%S')}")
+                    st.write(f"**任务 ID:** `{job.id[:8]}...`")
+                    st.write(f"**创建时间:** {job.created_at.strftime('%Y-%m-%d %H:%M:%S')}")
                     duration_placeholder = st.empty()
                     if job.status.value in ['completed', 'failed', 'cancelled']:
                         if job.completed_at and job.started_at:
                             duration = (job.completed_at - job.started_at).total_seconds()
-                            duration_placeholder.write(f"**Duration:** {duration:.1f}s")
+                            duration_placeholder.write(f"**耗时:** {duration:.1f}s")
                     else:
                         duration_placeholder.empty()
 
@@ -1569,20 +1539,20 @@ def render_runtime_dashboard():
                         st.progress(job.progress / 100)
                         st.caption(f"{job.current_step}")
                     elif job.status.value == 'completed':
-                        st.success("Editor rerender completed!" if is_editor_rerender else "Processing completed!")
+                        st.success("编辑器渲染完成!" if is_editor_rerender else "处理完成!")
                         if is_editor_rerender:
                             operation = (job.options or {}).get('operation')
                             clip_id = (job.options or {}).get('clip_id')
                             if operation:
-                                st.write(f"**Operation:** {operation}")
+                                st.write(f"**操作:** {operation}")
                             if clip_id:
-                                st.caption(f"Clip: {clip_id[:8]}...")
+                                st.caption(f"片段: {clip_id[:8]}...")
                         elif job.result and job.result.get('processing_time'):
-                            st.write(f"**Time:** {job.result['processing_time']:.1f}s")
+                            st.write(f"**耗时:** {job.result['processing_time']:.1f}s")
                     elif job.status.value == 'failed':
-                        st.error(f"Error: {job.error}")
+                        st.error(f"错误: {job.error}")
                     elif job.status.value == 'cancelled':
-                        st.warning("Job was cancelled")
+                        st.warning("任务已取消")
 
                 with col3:
                     button_placeholder = st.empty()
@@ -1590,13 +1560,13 @@ def render_runtime_dashboard():
                     if job.status.value == 'completed':
                         with button_placeholder.container():
                             if is_editor_rerender:
-                                if st.button("🛠️ Open in Editor", key=f"open_editor_job_{job.id}", use_container_width=True):
+                                if st.button("🛠️ 打开编辑器", key=f"open_editor_job_{job.id}", use_container_width=True):
                                     _launch_editor_for_job(job)
                             else:
-                                if st.button("📊 View", key=f"view_{job.id}", use_container_width=True):
+                                if st.button("📊 查看", key=f"view_{job.id}", use_container_width=True):
                                     data['processing_result'] = job.result
                                     st.rerun()
-                            if st.button("🗑️ Delete", key=f"delete_{job.id}", use_container_width=True):
+                            if st.button("🗑️ 删除", key=f"delete_{job.id}", use_container_width=True):
                                 job_manager.delete_job(job.id)
                                 st.rerun()
                     elif job.status.value == 'processing':
@@ -1604,30 +1574,30 @@ def render_runtime_dashboard():
                             is_tracked = job.id in st.session_state.processing_job_ids
 
                             if is_tracked:
-                                st.button("✓ Watching", key=f"watching_{job.id}", use_container_width=True, disabled=True)
+                                st.button("✓ 跟踪中", key=f"watching_{job.id}", use_container_width=True, disabled=True)
                             else:
-                                if st.button("👁️ Watch Progress", key=f"watch_{job.id}", use_container_width=True):
+                                if st.button("👁️ 查看进度", key=f"watch_{job.id}", use_container_width=True):
                                     st.session_state.processing_job_ids = [job.id]
                                     st.session_state.processing = True
                                     st.rerun()
 
-                            if st.button("⏹️ Cancel", key=f"cancel_{job.id}", use_container_width=True):
+                            if st.button("⏹️ 取消", key=f"cancel_{job.id}", use_container_width=True):
                                 job_manager.cancel_job(job.id)
                                 st.rerun()
                     elif job.status.value in ['failed', 'cancelled', 'pending']:
                         with button_placeholder.container():
                             if job.status.value in ['failed', 'cancelled']:
                                 source_deleted = bool((job.options or {}).get('source_deleted'))
-                                if st.button("🔄 Retry", key=f"retry_{job.id}", use_container_width=True, on_click=handle_retry, args=(job.id,), disabled=source_deleted):
+                                if st.button("🔄 重试", key=f"retry_{job.id}", use_container_width=True, on_click=handle_retry, args=(job.id,), disabled=source_deleted):
                                     pass
                                 if source_deleted:
-                                    st.caption('Retry unavailable: source upload was deleted.')
+                                    st.caption('重试不可用：上传的源文件已被删除。')
 
-                            if st.button("🗑️ Delete", key=f"delete_{job.id}", use_container_width=True):
+                            if st.button("🗑️ 删除", key=f"delete_{job.id}", use_container_width=True):
                                 job_manager.delete_job(job.id)
                                 st.rerun()
     else:
-        st.info("No jobs yet. Process a video below to get started!")
+        st.info("暂无任务。处理一个视频即可开始！")
 
     st.divider()
 
@@ -1664,7 +1634,7 @@ if use_custom_prompt:
     data['custom_prompt_text'] = custom_prompt_text
     
     # Save button for custom prompt
-    if st.button("💾 Save Prompt", key=f"save_custom_prompt_{st.session_state.reset_counter}"):
+    if st.button("💾 保存 Prompt", key=f"save_custom_prompt_{st.session_state.reset_counter}"):
         if custom_prompt_text:
             try:
                 # Create temp directory if it doesn't exist
@@ -1683,11 +1653,11 @@ if use_custom_prompt:
                 
                 # Show success message
                 st.success(f"✅ {t['custom_prompt_save_success']}")
-                st.caption(f"Saved to: {custom_prompt_file}")
+                st.caption(f"已保存至: {custom_prompt_file}")
             except Exception as e:
                 st.error(f"❌ {t['custom_prompt_save_error']} {str(e)}")
         else:
-            st.warning("⚠️ Please enter a highlight analysis prompt before saving.")
+            st.warning("⚠️ 请先输入高光分析 Prompt 再保存。")
     
     # Show current saved prompt file if exists
     if custom_prompt_file and Path(custom_prompt_file).exists():
@@ -1701,13 +1671,13 @@ if use_custom_prompt:
 
 # Show retry success/error messages
 if getattr(st.session_state, 'retry_success', None):
-    st.success(f"✅ Job retried! New ID: `{st.session_state.retry_success}`")
+    st.success(f"✅ 任务已重试！新 ID: `{st.session_state.retry_success}`")
     del st.session_state.retry_success
     time.sleep(1)
     st.rerun()
 
 if getattr(st.session_state, 'retry_error', False):
-    st.error("Failed to retry job")
+    st.error("重试任务失败")
     del st.session_state.retry_error
 
 # --- Handle Start ---
@@ -1715,17 +1685,17 @@ if process_clicked:
     source_ready = bool(video_source) if input_type != INPUT_TYPE_UPLOAD else uploaded_file is not None
     if not source_ready:
         if input_type == INPUT_TYPE_UPLOAD:
-            st.error('Please choose a video file to upload')
+            st.error('请选择要上传的视频文件')
         elif input_type == INPUT_TYPE_SERVER_PATH:
-            st.error('Please provide a server file path')
+            st.error('请提供服务器文件路径')
         else:
-            st.error('Please provide a video URL')
+            st.error('请提供视频 URL')
     elif not resolved_llm_model:
-        st.error("Please provide an LLM model name or configure the provider default model")
+        st.error("请提供 LLM 模型名称或配置默认模型")
     elif not resolved_llm_base_url:
-        st.error("Please provide an LLM base URL or configure the provider default base URL")
+        st.error("请提供 LLM Base URL 或配置默认地址")
     elif requires_api_key and not resolved_api_key:
-        st.error(f"Please provide {llm_provider.upper()} API key or set the {api_key_env_var} environment variable")
+        st.error(f"请提供 {llm_provider.upper()} API Key 或设置 {api_key_env_var} 环境变量")
     else:
         source_kind = SOURCE_KIND_URL
         upload_metadata = None
@@ -1757,8 +1727,6 @@ if process_clicked:
             'max_clips': max_clips,
             'clip_length_preset': clip_length_preset,
             'force_whisper': force_whisper,
-            'asr_backend': asr_backend,
-            'long_video_acceleration': long_video_acceleration,
             'cookie_mode': cookie_mode,
             'cookies_file': (cookies_file or None) if cookie_mode == 'file' else None,
             'speaker_references_dir': speaker_references_dir or None,
@@ -1779,7 +1747,7 @@ if process_clicked:
         # Check if this is a Bilibili multi-part video
         created_job_ids = []
         if source_kind == SOURCE_KIND_URL and is_bilibili_url(job_source):
-            with st.spinner("Checking for multi-part video..."):
+            with st.spinner("检查多P视频..."):
                 parts = asyncio.run(get_bilibili_multi_parts(
                     job_source,
                     browser=cookie_browser if cookie_mode == 'browser' else None,
@@ -1788,7 +1756,7 @@ if process_clicked:
 
             if parts and len(parts) > 1:
                 # Multi-part video detected, create a job for each part
-                st.info(f"📺 Detected multi-part video with {len(parts)} parts. Creating jobs for all parts...")
+                st.info(f"📺 检测到多P视频，共 {len(parts)} 个分P。正在为所有分P创建任务...")
 
                 for part in parts:
                     part_url = part['url']
@@ -1800,13 +1768,13 @@ if process_clicked:
                     job_manager.start_job(job_id, process_video_worker)
                     created_job_ids.append(job_id)
 
-                st.success(f"✅ Created {len(created_job_ids)} jobs for all parts!")
+                st.success(f"✅ 已创建 {len(created_job_ids)} 个任务！")
             else:
                 # Single video, create one job
                 job_id = job_manager.create_job(job_source, job_options)
                 job_manager.start_job(job_id, process_video_worker)
                 created_job_ids.append(job_id)
-                st.success(f"✅ Job started! ID: `{job_id[:8]}...`")
+                st.success(f"✅ 任务已启动！ID: `{job_id[:8]}...`")
         else:
             # Not Bilibili, create single job
             job_id = job_manager.create_job(job_source, job_options)
@@ -1821,11 +1789,11 @@ if process_clicked:
         
         # Show different message based on tracking state
         if len(created_job_ids) > 1:
-            st.info(f"💡 {len(created_job_ids)} jobs are running in background. Click 'Watch Progress' in job cards to track them.")
+            st.info(f"💡 {len(created_job_ids)} 个任务正在后台运行。点击任务卡片中的「查看进度」跟踪进展。")
         elif created_job_ids and created_job_ids[0] in st.session_state.processing_job_ids:
-            st.info("💡 This job is being tracked. You can close this page and come back later.")
+            st.info("💡 任务正在跟踪中。可以关闭页面稍后回来查看。")
         elif created_job_ids:
-            st.info("💡 Job is running in background. Click 'Watch Progress' in the job card to track it.")
+            st.info("💡 任务正在后台运行。点击任务卡片中的「查看进度」跟踪进展。")
         
         time.sleep(1)
         st.rerun()
@@ -1853,13 +1821,13 @@ def _finalize_results(result):
 if data['processing_result'] and not just_processed:
     header_col, action_col = st.columns([5, 1])
     with header_col:
-        st.header("📊 Saved Results")
+        st.header("📊 历史结果")
     with action_col:
         st.write("")
         st.write("")
-        clear_saved_results = st.button("Clear Saved Results", key="clear_saved_results_header")
+        clear_saved_results = st.button("清除历史结果", key="clear_saved_results_header")
     if 'success' not in data['processing_result']:
-        st.info("Saved results are only available for full processing jobs. Open editor rerender results from the job card instead.")
+        st.info("历史结果仅适用于完整处理任务。编辑器重渲染结果请从任务卡片打开。")
         if clear_saved_results:
             data['processing_result'] = None
             st.rerun()
@@ -1881,7 +1849,7 @@ if data['processing_result'] and not just_processed:
 # Footer
 st.markdown("""
 ---
-**Made with ❤️ for content creators**
+**为内容创作者打造 ❤️**
 """)
 
 # GitHub buttons row
@@ -1903,7 +1871,7 @@ with col1:
             align-items: center;
             gap: 6px;
         ">
-            <span>🐛</span> Report Bug
+            <span>🐛</span> 反馈 Bug
         </button>
     </a>
     """, unsafe_allow_html=True)
@@ -1925,7 +1893,7 @@ with col2:
             gap: 6px;
             white-space: nowrap;
         ">
-            <span>⭐</span> Star on GitHub
+            <span>⭐</span> GitHub Star
         </button>
     </a>
     """, unsafe_allow_html=True)
