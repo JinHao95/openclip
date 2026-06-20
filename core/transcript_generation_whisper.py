@@ -19,6 +19,7 @@ from core.config import (
     WHISPER_MODEL, TRANSCRIPT_LANGUAGE_DETECT_MODEL,
     ASR_SEGMENT_MINUTES, ASR_OVERLAP_SECONDS, ASR_PARALLEL_WORKERS,
     ASR_BACKEND, ASR_LLM_MODEL, ASR_LLM_PARALLEL_WORKERS,
+    ASR_ENGINE, ASR_WHISPERX_MODEL, ASR_WHISPERX_BATCH_SIZE,
     LLM_ANALYSIS_CHUNK_MINUTES, LLM_ANALYSIS_OVERLAP_SECONDS,
     API_KEY_ENV_VARS, LLM_CONFIG,
 )
@@ -221,8 +222,8 @@ class TranscriptProcessor:
         self.language = language  # None = auto-detect
         self.enable_diarization = enable_diarization
         self.language_detection_model = TRANSCRIPT_LANGUAGE_DETECT_MODEL
-        # WhisperX is required for diarization; enable it automatically when requested.
-        self.use_whisperx = enable_diarization and WHISPERX_AVAILABLE
+        # WhisperX is required for diarization; also use it when ASR_ENGINE == "whisperx"
+        self.use_whisperx = (enable_diarization or ASR_ENGINE == "whisperx") and WHISPERX_AVAILABLE
         self.paraformer_processor = ParaformerTranscriptProcessor()
         self._language_detector = None
 
@@ -232,7 +233,7 @@ class TranscriptProcessor:
         self.whisperx_processor = None
         if self.use_whisperx:
             self.whisperx_processor = TranscriptProcessorWhisperX(
-                whisper_model,
+                ASR_WHISPERX_MODEL if ASR_ENGINE == "whisperx" else whisper_model,
                 enable_diarization=enable_diarization,
                 speaker_references_dir=speaker_references_dir,
             )
@@ -588,6 +589,28 @@ class TranscriptProcessor:
         output_dir = Path(output_dir)
         output_dir.mkdir(parents=True, exist_ok=True)
         video_stem = Path(video_path).stem
+
+        # WhisperX GPU path: single-pass batched inference (no segmentation needed)
+        effective_engine = asr_backend or ASR_ENGINE
+        if effective_engine == "whisperx" and self.whisperx_processor:
+            logger.info("⚡ Using WhisperX GPU engine for full-video transcription")
+            import time as _time
+            t0 = _time.time()
+            srt_path = await self.whisperx_processor.transcribe_with_whisperx(
+                video_path, progress_callback
+            )
+            elapsed = _time.time() - t0
+            logger.info(f"⚡ WhisperX completed in {elapsed:.1f}s")
+            # Copy SRT to output_dir if not already there
+            srt_out = output_dir / f"{video_stem}.srt"
+            if str(Path(srt_path).resolve()) != str(srt_out.resolve()):
+                shutil.copy2(srt_path, str(srt_out))
+                srt_path = str(srt_out)
+            return {
+                "source": "whisperx",
+                "transcript_path": srt_path,
+                "transcript_parts": [srt_path],
+            }
 
         duration = self._get_video_duration(video_path)
         if duration <= 0:

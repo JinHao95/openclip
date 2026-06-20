@@ -88,42 +88,42 @@ Return your response as a JSON object following this exact structure:
   "top_engaging_moments": [
     {
       "rank": 1,
-      "title": "七人接力鉴定假发造型，现场即兴互动引爆弹幕高潮！",
+      "title": "凯恩点球破门！英格兰1-0领先克罗地亚",
       "timing": {
-        "video_part": "part02",
-        "start_time": "00:15:30",
-        "end_time": "00:17:15",
-        "duration": 105
+        "video_part": "chunk006",
+        "start_time": "00:20:24",
+        "end_time": "00:20:47",
+        "duration": 23
       },
-      "summary": "Brief description of what happens in this moment in 1-2 sentences.",
+      "summary": "凯恩主罚点球一蹴而就，英格兰率先取得领先。",
       "engagement_details": {
         "engagement_level": "high"
       },
-      "why_engaging": "多人互动环节，现场气氛热烈，弹幕互动频繁，具有很强的娱乐性和观赏价值",
-      "tags": ["co-hosting", "interactive", "humorous", "live-chemistry"]
+      "why_engaging": "本场首粒进球，比分改写，凯恩展现巨星本色",
+      "tags": ["进球", "点球", "明星球员", "赛事高光"]
     },
     {
       "rank": 2,
-      "title": "主播现场模仿秀惟妙惟肖 网友弹幕笑翻天",
+      "title": "索斯盖特围绕凯恩打造拜仁体系",
       "timing": {
-        "video_part": "part01",
-        "start_time": "00:05:20",
-        "end_time": "00:06:10",
-        "duration": 50
+        "video_part": "chunk008",
+        "start_time": "00:30:20",
+        "end_time": "00:30:50",
+        "duration": 30
       },
-      "summary": "Brief description of what happens in this second moment in 1-2 sentences.",
+      "summary": "解说深入分析英格兰如何围绕凯恩回撤展开战术体系。",
       "engagement_details": {
         "engagement_level": "medium"
       },
-      "why_engaging": "主播模仿惟妙惟肖，现场气氛欢乐，具有一定的娱乐效果",
-      "tags": ["humorous", "funny", "highlight"]
+      "why_engaging": "深入拆解战术设计，揭示凯恩伪九号踢法的战术价值",
+      "tags": ["战术解析", "球星表现", "深度解析"]
     }
   ],
   "total_moments": 2,
   "analysis_timestamp": "2024-01-01T12:00:00Z",
   "aggregation_criteria": "Selected based on engagement score, duration, and content quality",
   "analysis_summary": {
-    "highest_engagement_themes": ["co-hosting", "interactive", "humorous"],
+    "highest_engagement_themes": ["进球", "战术解析", "赛事高光"],
     "total_engaging_content_time": "2 minutes 35 seconds",
     "recommendation": "These moments represent the most entertaining and shareable content from the livestream"
   },

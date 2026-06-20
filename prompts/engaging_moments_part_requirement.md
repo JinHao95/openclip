@@ -1,207 +1,105 @@
-# Engaging Moments Analysis - Video Part
+# 足球赛事高光分析
 
-## Task
-Analyze the provided video transcript and identify interesting and engaging moments from live streaming videos. Focus on segments that would be compelling for viewers and suitable for creating short clips.
+## 任务
 
-**CRITICAL**: Only analyze the transcript provided to you. All timestamps MUST exist in the actual transcript - do not hallucinate or use placeholder timestamps.
+分析提供的足球比赛转录文本，识别值得制作短视频切片的精彩时刻。
 
-## Content Type Classification
+**关键约束**：只分析提供的转录文本。所有时间戳必须存在于实际转录中——严禁编造时间戳。
 
-First, identify the content type of this video from these categories:
+## 内容类型
 
-| Type | Characteristics | Key Engagement Signals |
-|------|-----------------|------------------------|
-| **entertainment** | Jokes, games, performances, variety shows | Laughter peaks, audience reactions, game climaxes |
-| **knowledge** | Tutorials, explanations, educational content | Key insights, "aha moments", actionable tips |
-| **speech** | Presentations, talks, storytelling | Emotional peaks, inspirational quotes, audience applause |
-| **opinion** | Debates, commentary, reviews | Strong viewpoints, controversial takes, debates |
-| **experience** | Life stories, personal anecdotes | Relatable moments, emotional resonance, personal revelations |
-| **business** | Professional advice, market analysis | Value propositions, expert insights, ROI signals |
-| **content_review** | Movie/game reviews, analyses | Unique opinions, surprising takes, comparisons |
-| **sports** | Match commentary, game highlights, athletic events | Goals, fouls, saves, crowd reactions, pivotal plays, replays |
+本分析固定为 `sports`（足球赛事）类型。输出 `detected_content_type` 字段统一填 `"sports"`。
 
-## General Engagement Criteria (Always Apply)
+## 识别标准
 
-These universal criteria apply to ALL content types:
+### 高优先级（必须捕获）：
+- 进球（含点球、任意球、乌龙球）
+- 红牌/黄牌/重大犯规
+- 关键扑救（门将神扑）
+- 比分变化瞬间
+- 绝杀/逆转/扳平
 
-### High Engagement Indicators:
-- **Emotional Impact**: Moments that evoke strong emotions (laughter, surprise, inspiration, excitement)
-- **Information Value**: Segments with unique insights, surprising facts, or valuable knowledge
-- **Interactivity**: Moments with dialogue, debates, or audience interaction
-- **Memorability**: Standout quotes, unique perspectives, or defining moments
-- **Relatability**: Content viewers can identify with or learn from
+### 中优先级：
+- 精彩射门（中柱/门框/被扑）
+- 战术亮点（经典配合/阵型变换）
+- 球星个人表现
+- VAR 争议判罚
+- 关键换人/战术调整
 
-### Quality Indicators:
-- **Completeness**: Segments with clear beginning, development, and conclusion
-- **Pacing**: Moments with good energy flow and rhythm
-- **Authenticity**: Genuine reactions, unscripted moments, or natural interactions
-- **Uniqueness**: Rare occurrences, special guests, or unexpected events
+### 低优先级（仍应标注）：
+- 解说精彩点评/金句
+- 历史纪录/数据对比
+- 赛前分析/赛后总结
+- 教练反应/球员庆祝
 
----
+## 数量要求（重要）
 
-## Type-Specific Engagement Criteria (Complement General)
+- 识别所有有明显动作的时刻（射门、扑救、进球、犯规、庆祝、战术配合等）
+- 不要过度筛选——中等质量的时刻也要包含
+- 后续聚合步骤会做最终筛选，所以宁多勿少
+- 如果转录中有动作内容，至少返回 1 个时刻
 
-In addition to the general criteria above, apply these type-specific nuances based on detected content type:
+## 时间边界原则（关键）
 
-### For ENTERTAINMENT:
-- Preserve complete jokes (setup → punchline → reaction)
-- Capture game climaxes and unexpected twists
-- Include audience/chat reactions
-- Prioritize comedic timing and funny moments
+**必须使用转录中的实际时间戳**
+- 严禁编造或猜测时间戳
+- start_time 和 end_time 必须在转录中有对应文本
+- **注意**：`00:01:55` 表示 1 分 55 秒，不是 `01:55:00`（1 小时 55 分）
 
-### For KNOWLEDGE:
-- Focus on "aha moments" and key insights
-- Identify actionable tips or valuable explanations
-- Look for concepts that simplify complex topics
-- Prioritize educational value and practical applications
-- Standalone: the clip should be understandable without watching the rest of the video; include enough context (e.g. the question or setup that prompted the point) in the time range
+**start_time 确定方法：**
+- 找到高光时刻的第一句核心相关文本
+- 跳过无关的过渡/填充内容
+- 对于进球：可从最后一脚关键传球开始（包含 3-5 秒铺垫）
 
-### For SPEECH:
-- Find emotional peaks and inspirational moments
-- Capture memorable quotes and powerful statements
-- Identify audience engagement (applause, etc.)
-- Look for storytelling climax and narrative resolution
-- Standalone: the clip should be understandable without watching the rest of the video
+**end_time 确定方法（最重要）：**
+- 必须是覆盖核心时刻的最后一句相关文本的时间戳
+- 确保语义完整，不要在句子中间截断
+- 在自然停顿、总结语句或话题转换处结束
+- 不要包含时刻结束后的无关内容
+- 不要将 end_time 设置为转录末尾
 
-### For OPINION:
-- Prioritize strong, controversial, or surprising viewpoints
-- Look for debates or disagreements
-- Find relatable or thought-provoking statements
-- Identify unique perspectives that challenge common beliefs
-- Standalone: the clip should be understandable without watching the rest of the video; include the question or context that triggered the opinion if present in the transcript
+**避免在以下位置截断：**
+- 句子中间
+- 关键论点展开中
+- 连续讨论无明确语义边界处
 
-### For EXPERIENCE:
-- Seek personal stories with emotional depth
-- Find relatable moments viewers can identify with
-- Look for surprising personal revelations
-- Capture authentic emotional expressions
+## 重叠处理
+- 如两个时刻时间范围重叠，保留更强的那个
+- 不要从同一时间范围创建多个切片
+- 确保每个时刻的时间范围唯一、不重叠
 
-### For BUSINESS:
-- Focus on expert insights and valuable advice
-- Identify actionable strategies and methodologies
-- Look for unique market perspectives and predictions
-- Prioritize high-value professional content
-- Standalone: the clip should be understandable without watching the rest of the video; include enough context so the advice or insight makes sense on its own
+## 输出格式
 
-### For CONTENT_REVIEW:
-- Capture unique or surprising opinions
-- Find bold predictions or controversial takes
-- Look for entertaining critiques and comparisons
-- Identify surprising revelations about reviewed content
-
-### For SPORTS:
-- Capture pivotal game moments (goals, penalties, key saves, red/yellow cards)
-- Prioritize unexpected turns (comeback, upset, last-minute equalizer)
-- Include crowd/commentary energy peaks as confirmation of importance
-- Look for star player individual moments and celebrations
-- Ensure each clip captures the full action arc (buildup → event → reaction)
-- Standalone: the clip should show a complete play sequence
-
-## Requirements
-
-### Quantity Guidelines (Important)
-- For sports content: identify ALL moments with notable action (shots, saves, goals, fouls, celebrations, tactical plays)
-- Do NOT be overly selective — include medium-engagement moments too
-- The aggregation step will handle final selection, so prefer more candidates over fewer
-- If the transcript contains action, always return at least 1 moment
-
-### Duration Constraints (Must Follow)
-- Follow the runtime **Clip Length Preference** section — each moment must NOT exceed the specified maximum
-- Prefer the shortest clip that captures the complete core action
-- Do not pad weak or unrelated context just to fill time
-- If a moment naturally exceeds the maximum, split it into multiple separate clips
-- Each clip should contain ONE core action (one shot, one save, one goal) — do not combine multiple actions
-
-### Time Boundary Principles (Critical)
-
-**MUST USE ACTUAL TIMESTAMPS FROM THE PROVIDED TRANSCRIPT**
-- Do not invent or hallucinate timestamps
-- Verify every timestamp exists in the transcript before including it
-- The transcript excerpt must match the actual text between start_time and end_time
-- **CRITICAL**: Copy timestamps EXACTLY as shown. `00:01:55` means 1min 55sec, NOT `01:55:00` (which is 1hr 55min)
-
-**How to determine `start_time`:**
-- Locate the first core statement about the engaging moment
-- Skip unrelated small talk, filler words, or transitions before it
-- Start at semantic boundaries for natural introduction
-- Look for topic introduction phrases, opinion shifts, or new discussion subjects
-
-**How to determine `end_time` (Most Important):**
-- MUST be the timestamp of the LAST relevant sentence covering the core moment
-- Ensure semantic completeness - avoid abrupt cut-offs
-- End at natural pauses, summary statements, or topic transitions
-- DO NOT include unrelated content after the moment ends
-- DO NOT blindly set end_time to the end of the transcript
-
-**Avoid Cutting At:**
-- Middle of sentences
-- During key point development
-- Critical logic reasoning steps
-- Continuous discussions without clear semantic boundaries
-
-### Handling Overlapping Moments
-- If two engaging moments overlap in time, choose the stronger one
-- Do not create multiple clips from the same time range
-- Ensure each moment has a unique, non-overlapping time range
-
-### Content Guidelines
-- Create attractive and engaging titles (no emojis, punctuation allowed)
-- Titles should avoid sensitive, negative, hate, or offensive words
-- Co-hosting segments and interactive moments are usually most engaging
-- Include a brief summary describing what happens in the moment
-- Provide clear explanations for why each moment is engaging
-
-### Engagement Analysis
-- Provide engagement levels: "high", "medium", or "low"
-- Add relevant tags from: ["co-hosting", "interactive", "humorous", "live-chemistry", "funny", "highlight", "reaction", "gaming", "chat-interaction", "insight", "inspiring", "controversial", "relatable", "valuable", "educational"]
-- Include "why_engaging" explanations that describe what makes each moment compelling
-
-## Analysis Instructions
-
-1. **Read the entire transcript first** - Understand the full context before identifying moments
-2. **Classify content type** - Determine which category best fits the video
-3. **Apply engagement criteria** - Use both general and type-specific criteria
-4. **Identify candidate moments** - Find segments that meet the engagement standards
-5. **Verify timestamps** - Ensure all timestamps actually exist in the provided transcript
-6. **Check duration** - Confirm each moment follows the runtime Clip Length Preference bounds
-7. **Avoid overlaps** - Ensure moments don't overlap in time
-8. **Quality over quantity** - Only include genuinely engaging moments
-9. **Write a summary** - Write a brief 1-2 sentence description of what happens in each moment
-10. **Write compelling titles** - Follow the language-specific title guidelines
-
-**If no moments meet the criteria**: Return an empty array rather than forcing low-quality selections.
-
-## Output Format
-Return your response as a JSON object following this exact structure:
+返回 JSON，严格遵循以下结构：
 
 ```json
 {
-  "video_part": "part01",
-  "detected_content_type": "entertainment",
+  "video_part": "chunk001",
+  "detected_content_type": "sports",
   "engaging_moments": [
     {
-      "title": "First engaging moment title without emojis",
-      "start_time": "HH:MM:SS",
-      "end_time": "HH:MM:SS",
-      "duration_seconds": 75,
-      "summary": "Brief description of what happens in this moment in 1-2 sentences.",
+      "title": "凯恩点球破门！英格兰1-0领先克罗地亚",
+      "start_time": "00:20:15",
+      "end_time": "00:20:40",
+      "duration_seconds": 25,
+      "summary": "凯恩主罚点球命中，英格兰率先取得领先。",
       "engagement_details": {
         "engagement_level": "high"
       },
-      "why_engaging": "Detailed explanation of why this moment is engaging",
-      "tags": ["co-hosting", "interactive", "humorous", "live-chemistry"]
+      "why_engaging": "本场首粒进球，比分改写，凯恩展现巨星本色",
+      "tags": ["进球", "点球", "明星球员", "赛事高光"]
     },
     {
-      "title": "Second engaging moment title without emojis",
-      "start_time": "HH:MM:SS",
-      "end_time": "HH:MM:SS",
-      "duration_seconds": 60,
-      "summary": "Brief description of what happens in this second moment in 1-2 sentences.",
+      "title": "索斯盖特围绕凯恩打造拜仁体系",
+      "start_time": "00:22:10",
+      "end_time": "00:22:35",
+      "duration_seconds": 25,
+      "summary": "解说分析英格兰战术体系如何围绕凯恩回撤展开。",
       "engagement_details": {
         "engagement_level": "medium"
       },
-      "why_engaging": "Detailed explanation of why this moment is engaging",
-      "tags": ["humorous", "funny", "highlight"]
+      "why_engaging": "深入拆解战术，揭示凯恩回撤与拜仁踢法的关联",
+      "tags": ["战术解析", "球星表现", "深度解析"]
     }
   ],
   "total_moments": 2,
@@ -209,50 +107,119 @@ Return your response as a JSON object following this exact structure:
 }
 ```
 
-**CRITICAL TIMESTAMP RULES:**
-1. **start_time** and **end_time** MUST correspond to actual timestamps in the provided transcript
-2. DO NOT use placeholder timestamps like "HH:MM:SS" or example timestamps like "00:01:30"
-3. Verify every timestamp exists in the transcript before including it
-4. If you cannot find valid timestamps, return an empty array
+**时间戳关键规则：**
+1. start_time 和 end_time 必须对应转录中的实际时间戳
+2. 不要使用占位符或示例时间戳
+3. 无法找到有效时间戳时返回空数组
+4. 格式为 HH:MM:SS，不要 SRT 毫秒格式
 
-**IMPORTANT QUALITY GUIDELINES:**
-1. You can identify MULTIPLE engaging moments if they exist (as shown in the example with 2 moments)
-2. If NO moments meet the engagement criteria, return: `"engaging_moments": []` with `"total_moments": 0`
-3. DO NOT force output if the content lacks genuine engagement value
-4. Quality over quantity - only include moments that truly meet the standards
-5. Better to return zero moments than low-quality or hallucinated selections
-6. Ensure moments do not overlap in time - each should have a unique time range
+**质量要求：**
+1. 可识别多个时刻（如上例有 2 个）
+2. 如无时刻满足标准，返回 `"engaging_moments": []` + `"total_moments": 0`
+3. 不要强行标注低质量内容
+4. 宁可返回零时刻，也不要返回低质量或编造的内容
+5. 确保时刻之间无时间重叠
 
-## Field Specifications
+## 字段说明
 
-### Top-Level Required Fields:
-- **video_part**: Identifier for this video segment (e.g., "part01")
-- **detected_content_type**: The content type category detected from the video (entertainment/knowledge/speech/opinion/experience/business/content_review/sports)
+### 顶层必填字段：
+- **video_part**: 视频片段标识（如 "chunk001"）
+- **detected_content_type**: 固定为 "sports"
 
-### Required Fields for Each Moment:
-- **title**: Compelling title without emojis (follow language-specific guidelines)
-- **start_time**: Simple time format (HH:MM:SS or MM:SS) - NOT SRT format with milliseconds
-- **end_time**: Simple time format (HH:MM:SS or MM:SS) - NOT SRT format with milliseconds
-- **duration_seconds**: Integer duration in seconds (must follow the runtime Clip Length Preference bounds)
-- **summary**: Brief 1-2 sentence description of what happens in this moment (content description, not engagement reasoning)
-- **engagement_details**: Object with "engagement_level" ("high", "medium", or "low")
-- **why_engaging**: Detailed explanation of what makes this moment compelling
-- **tags**: Array of relevant tags from the approved list
+### 每个时刻必填字段：
+- **title**: 15-25 个汉字，必须包含球员名 + 动作结果（遵循标题撰写指南）
+- **start_time**: HH:MM:SS 格式
+- **end_time**: HH:MM:SS 格式
+- **duration_seconds**: 整数秒（必须遵循时长约束）
+- **summary**: 1-2 句话描述发生了什么（内容描述，不是吸引力分析）
+- **engagement_details**: 含 "engagement_level"（"high"/"medium"/"low"）
+- **why_engaging**: 为什么这个时刻值得做成短视频
+- **tags**: 从已批准标签中选 3-5 个
 
-### Engagement Level Guidelines:
-- **"high"**: Exceptional moments with strong viewer appeal, multiple interactions, humor, or memorable content
-- **"medium"**: Good moments with decent entertainment value and some interaction
-- **"low"**: Mild interest moments that still meet minimum engagement criteria
+### engagement_level 判定：
+- **"high"**: 进球、绝杀、红牌、关键扑救等改变比赛走向的时刻
+- **"medium"**: 精彩射门、战术亮点、有价值的解说分析
+- **"low"**: 一般性战术讨论、数据回顾、赛况描述
 
-### Approved Tags:
-- **General**: ["co-hosting", "interactive", "humorous", "live-chemistry", "funny", "highlight", "reaction", "gaming", "chat-interaction", "insight", "inspiring", "controversial", "relatable", "valuable", "educational"]
-- **Sports** (use when detected_content_type is "sports"): ["进球", "射门", "头球", "点球", "红牌", "黄牌", "扑救", "任意球", "角球", "越位", "VAR", "换人", "助攻", "反击", "庆祝", "绝杀", "逆转", "乌龙球", "明星球员", "战术亮点", "赛事高光"]
+## 已批准标签
 
-When content is sports, use sports tags. You may combine sports tags with general tags like "highlight" if applicable. You may also add custom tags not in the list if they accurately describe the moment. Aim for 3-5 tags per moment to maximize filtering options.
+### 足球动作（描述场上发生了什么）：
+["进球", "射门", "头球", "点球", "红牌", "黄牌", "扑救", "任意球", "角球", "越位", "VAR", "换人", "助攻", "反击", "庆祝", "绝杀", "逆转", "乌龙球", "明星球员", "战术亮点", "赛事高光"]
 
-## IMPORTANT: JSON Response Format
-- Return ONLY valid JSON, no additional text or explanations
-- Use the exact structure shown above
-- Ensure all strings are properly quoted
-- Do not include trailing commas
-- Verify JSON syntax before responding
+### 足球分析（描述解说在做什么类型的点评）：
+["战术解析", "球星表现", "历史纪录", "裁判争议", "数据分析", "教练布置", "阵型变化", "体能管理", "赛前分析", "赛后总结", "经典对决", "名嘴金句"]
+
+### 通用补充：
+["精彩集锦", "深度解析", "争议"]
+
+足球动作标签描述场上发生了什么（进球/射门/扑救等），足球分析标签描述解说在做什么类型的点评（战术拆解/历史纪录/裁判争议等）。每个时刻应同时包含动作 + 分析/补充标签，共 3-5 个。允许使用列表外的自定义中文标签。
+
+### Sports Tag Decision Rules（关键——体育内容必须遵守）：
+
+**Step 1：选标签之前，先确定结果。**
+对每个动作时刻，问自己："这个动作的最终结果是什么？"
+- 球打进了球门 → 主标签必须是"进球"，不要同时加"射门"
+- 球没进（被扑/偏出/中柱）→ 主标签是"射门"或"扑救"，不要加"进球"
+- "进球"和"射门"互斥——绝不同时使用
+
+**Step 2：分类规则表：**
+
+| 情况 | 必须使用的主标签 | 信号词举例 |
+|------|----------------|-----------|
+| 进球 | **进球** | 破门、进球、得分、入网、扳平、反超、领先、比分X-X |
+| 射门未进 | 射门 | 射偏、打高、被扑、中柱、险些、差一点、没能打进 |
+| 门将扑救 | 扑救 | 扑出、化解、门将出击、神扑 |
+| 点球命中 | 进球 + 点球 | 点球命中、罚进、一蹴而就 |
+| 点球未中 | 射门 + 点球 | 罚失、射偏、被扑出 |
+| 乌龙球 | 进球 + 乌龙球 | 乌龙、自摆乌龙、打入自家球门 |
+| 头球破门 | 进球 + 头球 | 头球破门、头球攻门得手 |
+
+**Step 3：处理 ASR 噪声（语音识别错误）：**
+语音识别经常把关键中文足球术语识别错：
+- "破门" → 可能显示为：破满、泼满、薄面、迫门、破闷
+- "进球" → 可能显示为：进求、尽球、金球、禁球
+- "扳平" → 可能显示为：半平、板平、般平
+- "得分" → 可能显示为：的分、德分
+
+当看到语音上类似进球确认词的乱码文本，且上下文指示有进球事件（解说兴奋、回放、比分变化），分类为"进球"。
+
+**Step 4：用上下文线索确认进球：**
+即使没有明确的"破门/进球"词汇，以下信号可确认进球：
+- 射门后解说突然变得兴奋/庆祝性语调
+- 提到比分变化（"比分变成X比X"）
+- 回放讨论进球过程
+- 提到"扳平/反超/领先/绝杀/绝平"
+- 球员庆祝或观众爆发
+
+**绝不将已确认的进球仅标为"射门"。"射门"意味着球没进。**
+
+**Step 5：避免重复标注同一进球：**
+一个进球可能产生多个转录片段（直播呼叫→回放→分析→庆祝）。这些都是同一个进球事件。规则：
+- 每个实际进球只创建一个标为"进球"的时刻——选择最完整捕获动作的片段（铺垫→射门→确认）
+- 同一进球的后续回放分析、战术拆解或庆祝解说应标为"战术亮点"或"赛事高光"，不标"进球"
+- 判断方法：同一射手、时间戳相隔 2-3 分钟内、解说提到"刚才的进球/这个球/这脚射门"
+- 不确定时：检查比分是否变了两次（短时间内不可能）——如果没有，就是同一个进球
+
+### 足球分析 Tag 判定规则：
+
+| 标签 | 使用场景 | 判定依据 |
+|------|---------|---------|
+| 战术解析 | 解说拆解战术细节 | 提及阵型/跑位/传球路线/防守站位 |
+| 球星表现 | 聚焦个人发挥 | 提及球员名字+具体表现评价 |
+| 历史纪录 | 涉及纪录或里程碑 | 追平/打破纪录、进球数统计 |
+| 裁判争议 | 判罚争议 | 对裁判判罚的质疑或慢镜分析 |
+| 数据分析 | 引用数据 | 控球率/跑动距离/射正数等统计 |
+| 教练布置 | 教练决策 | 换人意图、战术调整、临场指挥 |
+| 阵型变化 | 阵型调整 | 从X-X-X变为Y-Y-Y、攻防转换 |
+| 体能管理 | 体能话题 | 跑动下降、体能分配、加时赛体能 |
+| 赛前分析 | 赛前前瞻 | 首发预测、对位分析、历史交锋 |
+| 赛后总结 | 赛后评价 | 全场总结、MVP评选、赛后数据 |
+| 经典对决 | 巨星对决 | 两位核心球员正面对抗 |
+| 名嘴金句 | 解说名言 | 经典点评、犀利吐槽、专业金句 |
+
+## JSON 输出格式要求
+- 只返回有效 JSON，不要附加文字或解释
+- 使用上面展示的精确结构
+- 确保所有字符串正确引用
+- 不要使用尾逗号
+- 返回前验证 JSON 语法

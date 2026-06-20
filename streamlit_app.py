@@ -457,7 +457,7 @@ DEFAULT_DATA = {
     'use_background': False,
     'use_custom_prompt': False,
     'force_whisper': False,
-    'asr_backend': 'whisper',
+    'asr_backend': 'whisperx',
     'long_video_acceleration': False,
     'generate_clips': True,
     'max_clips': MAX_CLIPS,
@@ -1059,7 +1059,7 @@ with st.sidebar:
     max_clips = st.number_input(
         t['max_clips'],
         min_value=1,
-        max_value=100,
+        max_value=200,
         value=int(data['max_clips']),
         step=1,
         help=t['max_clips_help'],
@@ -1266,11 +1266,11 @@ with st.sidebar:
         )
         data['force_whisper'] = force_whisper
 
-        asr_backend_options = ["whisper", "llm"]
+        asr_backend_options = ["whisperx", "whisper", "llm"]
         asr_backend = st.selectbox(
             t['asr_backend'],
             options=asr_backend_options,
-            index=asr_backend_options.index(data.get('asr_backend', 'whisper')),
+            index=asr_backend_options.index(data.get('asr_backend', 'whisperx')),
             help=t['asr_backend_help'],
             key=f"asr_backend_{st.session_state.reset_counter}",
         )
@@ -1434,7 +1434,7 @@ def process_video_worker(job, progress_callback):
     result = asyncio.run(orchestrator.process_video(
         job.video_source,
         force_whisper=options['force_whisper'],
-        asr_backend=options.get('asr_backend', 'whisper'),
+        asr_backend=options.get('asr_backend') or None,
         skip_download=False,
         progress_callback=progress_callback,
     ))

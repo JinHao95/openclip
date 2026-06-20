@@ -164,7 +164,7 @@ PARAFORMER_DEVICE: str = os.getenv("PARAFORMER_DEVICE", "auto")
 DEFAULT_TITLE_STYLE: str = "fire_flame"
 
 # Maximum number of highlight clips to generate
-MAX_CLIPS: int = 100
+MAX_CLIPS: int = 200
 
 # Subtitle translation post-processing
 SUBTITLE_TRANSLATION_MAX_WORKERS: int = max(
@@ -191,11 +191,16 @@ AUDIO_ENERGY_CONFIG: dict = {
 # Parallel ASR configuration (non-accelerated mode)
 ASR_SEGMENT_MINUTES: float = _env_float("ASR_SEGMENT_MINUTES", 5.0)
 ASR_OVERLAP_SECONDS: float = _env_float("ASR_OVERLAP_SECONDS", 5.0)
-ASR_PARALLEL_WORKERS: int = _env_int("ASR_PARALLEL_WORKERS", 3)
+ASR_PARALLEL_WORKERS: int = _env_int("ASR_PARALLEL_WORKERS", 6)
+
+# ASR engine: "whisper" (CPU CLI), "whisperx" (GPU faster-whisper), "llm" (API-based)
+ASR_ENGINE: str = os.getenv("ASR_ENGINE", "whisperx")
+ASR_WHISPERX_MODEL: str = os.getenv("ASR_WHISPERX_MODEL", "small")
+ASR_WHISPERX_BATCH_SIZE: int = _env_int("ASR_WHISPERX_BATCH_SIZE", 16)
 
 # LLM analysis chunking
-LLM_ANALYSIS_CHUNK_MINUTES: float = _env_float("LLM_ANALYSIS_CHUNK_MINUTES", 2.0)
-LLM_ANALYSIS_OVERLAP_SECONDS: float = _env_float("LLM_ANALYSIS_OVERLAP_SECONDS", 30.0)
+LLM_ANALYSIS_CHUNK_MINUTES: float = _env_float("LLM_ANALYSIS_CHUNK_MINUTES", 4.0)
+LLM_ANALYSIS_OVERLAP_SECONDS: float = _env_float("LLM_ANALYSIS_OVERLAP_SECONDS", 45.0)
 MAX_CONCURRENT_LLM_ANALYSES: int = _env_int("MAX_CONCURRENT_LLM_ANALYSES", 5)
 
 # ASR backend: "whisper" (local, default) or "llm" (API-based, faster)

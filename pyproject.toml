@@ -38,6 +38,13 @@ speakers = [
     "python-dotenv",
 ]
 
+# GPU-accelerated ASR via WhisperX (faster-whisper / CTranslate2)
+# Install with: uv sync --extra gpu-asr
+gpu-asr = [
+    "whisperx>=3.8.1",
+    "faster-whisper>=1.0.0",
+]
+
 # ── PyTorch platform routing ─────────────────────────────────────────────────
 # torch/torchaudio come transitively from whisperx; these sources tell uv
 # which index to pull from per platform when the [speakers] extra is installed.

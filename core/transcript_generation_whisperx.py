@@ -137,7 +137,10 @@ class TranscriptProcessorWhisperX:
         if callback:
             callback("Transcribing with WhisperX...", 10)
         logger.info(f"⚡ WhisperX: Transcribing (model: {self.whisper_model})")
+        import time as _time
+        _t0 = _time.time()
         model = whisperx.load_model(self.whisper_model, self.device, compute_type=self.compute_type)
+        logger.info(f"⚡ WhisperX: Model loaded in {_time.time() - _t0:.1f}s")
 
         # Detect language on first 30 s before the full transcription so we can
         # pass the right chunk_size: CJK scripts need smaller chunks (5 s) because
@@ -147,25 +150,33 @@ class TranscriptProcessorWhisperX:
         chunk_size = _chunk_size_for(detected_language)
         logger.info(f"⚡ WhisperX: Detected language: {detected_language} → chunk_size={chunk_size}")
 
-        result = model.transcribe(audio, batch_size=16, language=detected_language, chunk_size=chunk_size)
+        from core.config import ASR_WHISPERX_BATCH_SIZE
+        _t1 = _time.time()
+        result = model.transcribe(audio, batch_size=ASR_WHISPERX_BATCH_SIZE, language=detected_language, chunk_size=chunk_size)
+        logger.info(f"⚡ WhisperX: Transcription done in {_time.time() - _t1:.1f}s")
         del model
         # Note: result["language"] would match detected_language — no need to re-read it.
 
-        # Step 2: Align timestamps
-        if callback:
-            callback("Aligning word timestamps...", 40)
-        logger.info("⚡ WhisperX: Aligning timestamps")
-        try:
-            model_a, metadata = whisperx.load_align_model(
-                language_code=detected_language, device=self.device
-            )
-            result = whisperx.align(
-                result["segments"], model_a, metadata, audio, self.device,
-                return_char_alignments=False,
-            )
-            del model_a
-        except Exception as e:
-            logger.warning(f"⚠️  Alignment failed ({e}), using unaligned segments")
+        # Step 2: Align timestamps (skip for pure ASR mode — segment timestamps are sufficient)
+        from core.config import ASR_ENGINE
+        skip_alignment = (ASR_ENGINE == "whisperx" and not self.enable_diarization)
+        if not skip_alignment:
+            if callback:
+                callback("Aligning word timestamps...", 40)
+            logger.info("⚡ WhisperX: Aligning timestamps")
+            try:
+                model_a, metadata = whisperx.load_align_model(
+                    language_code=detected_language, device=self.device
+                )
+                result = whisperx.align(
+                    result["segments"], model_a, metadata, audio, self.device,
+                    return_char_alignments=False,
+                )
+                del model_a
+            except Exception as e:
+                logger.warning(f"⚠️  Alignment failed ({e}), using unaligned segments")
+        else:
+            logger.info("⚡ WhisperX: Skipping alignment (segment timestamps sufficient for highlight extraction)")
 
         # Step 3: Diarize (optional)
         if self.enable_diarization:

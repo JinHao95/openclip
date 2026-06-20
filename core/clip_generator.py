@@ -54,18 +54,24 @@ class ClipGenerator:
                 f"subtitle gap >= {subtitle_gap_boundary_threshold}s)"
             )
     
-    def generate_clips_from_analysis(self, 
+    def generate_clips_from_analysis(self,
                                     analysis_file: str,
                                     video_dir: str,
-                                    subtitle_dir: Optional[str] = None) -> Dict[str, Any]:
+                                    subtitle_dir: Optional[str] = None,
+                                    full_srt_path: Optional[str] = None,
+                                    cover_generator=None,
+                                    cover_config: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
         """
         Generate clips from engaging moments analysis
-        
+
         Args:
             analysis_file: Path to top_engaging_moments.json
             video_dir: Directory containing source video files
             subtitle_dir: Directory containing subtitle files (optional)
-            
+            full_srt_path: Path to the full video SRT for subtitle extraction
+            cover_generator: Optional CoverImageGenerator for inline cover generation
+            cover_config: Cover generation config (output_dir, text_location, fill_color, outline_color)
+
         Returns:
             Dictionary with generation results
         """
@@ -76,13 +82,18 @@ class ClipGenerator:
             
             video_dir = Path(video_dir)
             subtitle_dir = Path(subtitle_dir) if subtitle_dir else video_dir
-            
+
             logger.info("🎬 Generating clips from Top Engaging Moments")
             logger.info(f"📁 Output: {self.output_dir}")
             logger.info(f"📝 Subtitle directory: {subtitle_dir}")
-            
+            if full_srt_path:
+                logger.info(f"📝 Full SRT for subtitle extraction: {full_srt_path}")
+            if cover_generator:
+                logger.info(f"🖼️  Inline cover generation enabled")
+
             clips_info = []
             successful_clips = 0
+            generated_covers = []
 
             def _process_moment(moment):
                 rank = moment['rank']
@@ -106,10 +117,12 @@ class ClipGenerator:
                 effective_start_time = start_time
                 effective_end_time = end_time
                 normalization_details = {'start': 'disabled', 'end': 'disabled'}
-                subtitle_file = self._find_subtitle_file(video_part, subtitle_dir)
-                normalization_source = "whisper" if moment.get("whisper_subtitle_source") else "original"
-                normalization_subtitle_file = moment.get("whisper_subtitle_source") or subtitle_file
-                logger.info(f"  📝 Boundary transcript source: {normalization_source}")
+                # For boundary normalization: prefer full SRT, fallback to chunk SRT
+                normalization_subtitle_file = moment.get("whisper_subtitle_source") or full_srt_path
+                if not normalization_subtitle_file:
+                    normalization_subtitle_file = self._find_subtitle_file(video_part, subtitle_dir)
+                normalization_source = "full_srt" if normalization_subtitle_file == full_srt_path else "chunk"
+                logger.info(f"  📝 Boundary normalization source: {normalization_source}")
                 if normalization_subtitle_file and self.normalize_boundaries:
                     srt_segments = self._parse_srt_file(normalization_subtitle_file)
                     if srt_segments:
@@ -126,12 +139,20 @@ class ClipGenerator:
                     logger.error(f"✗ Failed: {output_filename}")
                     return None
 
+                # Subtitle extraction: prefer full SRT for accurate time matching
                 subtitle_filename = f"rank_{rank:02d}_{safe_title}.srt"
                 subtitle_path = self.output_dir / subtitle_filename
-                subtitle_generated = self._extract_subtitle_for_clip(
-                    video_part, effective_start_time, effective_end_time,
-                    str(subtitle_path), subtitle_dir
-                )
+                subtitle_generated = False
+                if full_srt_path:
+                    subtitle_generated = self._extract_subtitle_from_file(
+                        full_srt_path, effective_start_time,
+                        effective_end_time, str(subtitle_path),
+                    )
+                if not subtitle_generated:
+                    subtitle_generated = self._extract_subtitle_for_clip(
+                        video_part, effective_start_time, effective_end_time,
+                        str(subtitle_path), subtitle_dir
+                    )
                 whisper_subtitle_filename = None
                 whisper_subtitle_source = moment.get("whisper_subtitle_source")
                 if whisper_subtitle_source:
@@ -154,7 +175,37 @@ class ClipGenerator:
                 if whisper_subtitle_filename:
                     logger.info(f"✓ Whisper subtitle: {whisper_subtitle_filename}")
 
-                return {
+                # Inline cover generation (parallelized with clip cutting)
+                cover_info = None
+                if cover_generator and cover_config:
+                    try:
+                        covers_dir = Path(cover_config['output_dir'])
+                        cover_filename = f"cover_rank_{rank:02d}_{safe_title}.jpg"
+                        cover_path = covers_dir / cover_filename
+                        cover_success = cover_generator.generate_cover(
+                            str(output_path),
+                            title,
+                            str(cover_path),
+                            frame_time=0.0,
+                            text_location=cover_config.get('text_location', 'center'),
+                            fill_color=cover_config.get('fill_color', (255, 220, 0)),
+                            outline_color=cover_config.get('outline_color', (0, 0, 0)),
+                        )
+                        if cover_success:
+                            vertical_path = cover_path.with_name(cover_path.stem + '_vertical' + cover_path.suffix)
+                            cover_info = {
+                                'rank': rank,
+                                'title': title,
+                                'filename': cover_filename,
+                                'path': str(cover_path),
+                                'vertical_filename': vertical_path.name if vertical_path.exists() else None,
+                                'vertical_path': str(vertical_path) if vertical_path.exists() else None,
+                            }
+                            logger.info(f"✓ Cover: {cover_filename}")
+                    except Exception as e:
+                        logger.warning(f"⚠ Cover generation failed for rank {rank}: {e}")
+
+                result_dict = {
                     'rank': rank,
                     'title': title,
                     'filename': output_filename,
@@ -168,7 +219,9 @@ class ClipGenerator:
                     'engagement_level': moment['engagement_details'].get('engagement_level', 'N/A'),
                     'why_engaging': moment['why_engaging'],
                     'tags': moment.get('tags', []),
+                    '_cover_info': cover_info,
                 }
+                return result_dict
 
             with ThreadPoolExecutor(max_workers=6) as executor:
                 futures = {
@@ -178,15 +231,18 @@ class ClipGenerator:
                 for future in as_completed(futures):
                     result = future.result()
                     if result:
+                        cover_info = result.pop('_cover_info', None)
+                        if cover_info:
+                            generated_covers.append(cover_info)
                         clips_info.append(result)
                         successful_clips += 1
 
             clips_info.sort(key=lambda x: x['rank'])
-            
+
             # Create summary
             if clips_info:
                 self._create_summary(clips_info, data)
-            
+
             result = {
                 'success': successful_clips > 0,
                 'total_clips': len(data['top_engaging_moments']),
@@ -194,7 +250,11 @@ class ClipGenerator:
                 'clips_info': clips_info,
                 'output_dir': str(self.output_dir)
             }
-            
+            if generated_covers:
+                generated_covers.sort(key=lambda x: x['rank'])
+                result['covers'] = generated_covers
+                logger.info(f"🖼️  Generated {len(generated_covers)} covers inline")
+
             logger.info(f"🎯 Generated {successful_clips}/{len(data['top_engaging_moments'])} clips")
             return result
             
@@ -248,28 +308,40 @@ class ClipGenerator:
         try:
             with open(srt_path, 'r', encoding='utf-8') as f:
                 content = f.read().strip()
-            
+
             # Split by double newlines to get individual subtitle blocks
             blocks = re.split(r'\n\s*\n', content)
-            
+
             for block in blocks:
                 lines = block.strip().split('\n')
-                if len(lines) >= 3:
-                    index = int(lines[0])
-                    time_line = lines[1]
-                    text = '\n'.join(lines[2:])
-                    
-                    # Parse time line "00:00:00,000 --> 00:00:00,800"
-                    time_match = re.match(r'(\d{2}:\d{2}:\d{2},\d{3})\s*-->\s*(\d{2}:\d{2}:\d{2},\d{3})', time_line)
-                    if time_match:
-                        start_time = time_match.group(1)
-                        end_time = time_match.group(2)
-                        segments.append({
-                            'index': index,
-                            'start_time': start_time,
-                            'end_time': end_time,
-                            'text': text
-                        })
+                if len(lines) < 2:
+                    continue
+                # Skip [CONTEXT]/[TARGET] marker blocks
+                if lines[0].startswith('['):
+                    continue
+                try:
+                    int(lines[0])
+                except ValueError:
+                    continue
+                if len(lines) < 3:
+                    continue
+                time_line = lines[1]
+                text = '\n'.join(lines[2:])
+
+                # Support both comma (SRT standard) and dot (WhisperX) timestamp formats
+                time_match = re.match(
+                    r'(\d{2}:\d{2}:\d{2}[,\.]\d{3})\s*-->\s*(\d{2}:\d{2}:\d{2}[,\.]\d{3})',
+                    time_line
+                )
+                if time_match:
+                    start_time = time_match.group(1).replace('.', ',')
+                    end_time = time_match.group(2).replace('.', ',')
+                    segments.append({
+                        'index': len(segments) + 1,
+                        'start_time': start_time,
+                        'end_time': end_time,
+                        'text': text
+                    })
             
             logger.info(f"📝 Parsed {len(segments)} subtitle segments from {srt_path}")
             return segments

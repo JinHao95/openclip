@@ -538,7 +538,7 @@ The response should follow this structure:
         "engagement_level": "high"
       }},
       "why_engaging": "多人互动环节，现场气氛热烈，弹幕互动频繁，具有很强的娱乐性和观赏价值",
-      "tags": ["co-hosting", "interactive", "humorous", "live-chemistry"]
+      "tags": ["进球", "赛事高光", "明星球员", "精彩集锦"]
     }}
   ],
   "total_moments": 1,
@@ -549,7 +549,7 @@ IMPORTANT:
 - start_time and end_time should be in simple format (HH:MM:SS or MM:SS), NOT SRT format with milliseconds
 - Remove any "engagement_score" field if present
 - Ensure "why_engaging" is shorter than 100 characters
-- Use only approved tags: ["co-hosting", "interactive", "humorous", "live-chemistry", "funny", "highlight", "reaction", "gaming", "chat-interaction", "insight", "inspiring", "controversial", "relatable", "valuable", "educational"]
+- Use only approved tags: ["进球", "射门", "头球", "点球", "红牌", "黄牌", "扑救", "任意球", "角球", "越位", "VAR", "换人", "助攻", "反击", "庆祝", "绝杀", "逆转", "乌龙球", "明星球员", "战术亮点", "赛事高光", "战术解析", "球星表现", "历史纪录", "裁判争议", "数据分析", "教练布置", "阵型变化", "体能管理", "赛前分析", "赛后总结", "经典对决", "名嘴金句", "精彩集锦", "深度解析", "争议"]
 
 Here is the malformed response:
 {malformed_response}
@@ -895,15 +895,15 @@ The response should follow this structure:
       "engagement_details": {{
         "engagement_level": "high"
       }},
-      "why_engaging": "多人互动环节，现场气氛热烈，弹幕互动频繁，具有很强的娱乐性和观赏价值",
-      "tags": ["co-hosting", "interactive", "humorous", "live-chemistry"]
+      "why_engaging": "本场首粒进球，比分改写，凯恩展现巨星本色",
+      "tags": ["进球", "赛事高光", "明星球员", "精彩集锦"]
     }}
   ],
   "total_moments": 5,
   "analysis_timestamp": "2024-01-01T12:00:00Z",
   "aggregation_criteria": "Selected based on engagement score, duration, and content quality",
   "analysis_summary": {{
-    "highest_engagement_themes": ["co-hosting", "interactive", "humorous"],
+    "highest_engagement_themes": ["进球", "战术解析", "赛事高光"],
     "total_engaging_content_time": "8 minutes 45 seconds",
     "recommendation": "These moments represent the most entertaining and shareable content from the livestream"
   }},
@@ -913,14 +913,14 @@ The response should follow this structure:
 IMPORTANT:
 - start_time and end_time should be in simple format (HH:MM:SS or MM:SS), NOT SRT format with milliseconds
 - Ensure all timing information is preserved accurately
-- Use only approved tags: ["co-hosting", "interactive", "humorous", "live-chemistry", "funny", "highlight", "reaction", "gaming", "chat-interaction", "insight", "inspiring", "controversial", "relatable", "valuable", "educational"]
+- Use only approved tags: ["进球", "射门", "头球", "点球", "红牌", "黄牌", "扑救", "任意球", "角球", "越位", "VAR", "换人", "助攻", "反击", "庆祝", "绝杀", "逆转", "乌龙球", "明星球员", "战术亮点", "赛事高光", "战术解析", "球星表现", "历史纪录", "裁判争议", "数据分析", "教练布置", "阵型变化", "体能管理", "赛前分析", "赛后总结", "经典对决", "名嘴金句", "精彩集锦", "深度解析", "争议"]
 
 Here is the malformed response:
 {malformed_response}
 
 Please fix the JSON and return ONLY the valid JSON, no explanations:
 """
-        
+
         try:
             # Use a simpler model for JSON fixing
             fixed_response = self.llm_client.simple_chat(fix_prompt, model=self.model)

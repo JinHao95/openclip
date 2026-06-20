@@ -285,7 +285,7 @@ class VideoOrchestrator:
     async def process_video(self,
                           source: str,
                           force_whisper: bool = False,
-                          asr_backend: str = "whisper",
+                          asr_backend: Optional[str] = None,
                           custom_filename: Optional[str] = None,
                           skip_download: bool = SKIP_DOWNLOAD,
                           skip_transcript: bool = SKIP_TRANSCRIPT,
@@ -573,9 +573,11 @@ class VideoOrchestrator:
 
             # Step 5: Generate clips from engaging moments (if enabled and analysis available)
             if self.clip_generator and engaging_result and engaging_result.get('aggregated_file'):
-                logger.info("🎬 Step 5: Generating clips from engaging moments...")
+                logger.info("🎬 Step 5: Generating clips + covers (parallel)...")
                 if progress_callback:
                     progress_callback("Generating video clips...", 70)
+
+                _step5_start = _time.time()
 
                 # Determine video directory
                 # For long_video_acceleration or parallel ASR, clips use absolute timestamps
@@ -588,22 +590,37 @@ class VideoOrchestrator:
                 else:
                     video_dir = Path(result.video_path).parent
 
-                # Determine subtitle directory
+                # Determine subtitle directory and full SRT path
                 subtitle_dir = None
+                full_srt_path = None
+                if result.transcript_path:
+                    full_srt_path = result.transcript_path
                 if result.was_split and result.transcript_parts:
                     subtitle_dir = Path(result.transcript_parts[0]).parent
                 elif result.transcript_path:
                     subtitle_dir = Path(result.transcript_path).parent
-                
+
                 # Update clip generator output dir
                 self.clip_generator.output_dir = video_clips_dir
-                
+
                 clip_result = self.clip_generator.generate_clips_from_analysis(
                     engaging_result['aggregated_file'],
                     str(video_dir),
-                    str(subtitle_dir) if subtitle_dir else None
+                    str(subtitle_dir) if subtitle_dir else None,
+                    full_srt_path=full_srt_path,
+                    cover_generator=self.cover_generator,
+                    cover_config={
+                        'output_dir': str(video_clips_dir),
+                        'text_location': getattr(self, 'cover_text_location', 'center'),
+                        'fill_color': getattr(self, 'cover_fill_color', (255, 220, 0)),
+                        'outline_color': getattr(self, 'cover_outline_color', (0, 0, 0)),
+                    } if self.cover_generator else None,
                 )
                 result.clip_generation = clip_result
+                _step5_elapsed = _time.time() - _step5_start
+                _n_clips = clip_result.get('successful_clips', 0)
+                _n_covers = len(clip_result.get('covers', []))
+                logger.info(f"⏱️  Step 5 completed: {_n_clips} clips + {_n_covers} covers in {_step5_elapsed:.1f}s")
                 
                 # Step 6: Post-processing (titles and/or subtitles) → clips_post_processed/
                 has_titles    = self.title_adder is not None
@@ -751,13 +768,16 @@ class VideoOrchestrator:
             
             # Step 7: Generate cover images (if enabled and analysis available)
             if self.cover_generator and engaging_result and engaging_result.get('aggregated_file'):
-                logger.info("🖼️  Step 7: Generating cover images...")
-                if progress_callback:
-                    progress_callback("Generating cover images...", 90)
-                
-                # Pass the video-specific clip directory to cover generation
-                cover_result = self._generate_cover_image(result, engaging_result, video_clips_dir, video_titles_dir)
-                result.cover_generation = cover_result
+                # Check if covers were already generated inline during clip generation
+                if clip_result and clip_result.get('covers'):
+                    logger.info("🖼️  Step 7: Cover images already generated inline with clips")
+                    result.cover_generation = {'success': True, 'covers': clip_result['covers']}
+                else:
+                    logger.info("🖼️  Step 7: Generating cover images...")
+                    if progress_callback:
+                        progress_callback("Generating cover images...", 90)
+                    cover_result = self._generate_cover_image(result, engaging_result, video_clips_dir, video_titles_dir)
+                    result.cover_generation = cover_result
 
             self._refresh_editor_manifest(result, video_root_dir)
 
