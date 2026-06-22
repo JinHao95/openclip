@@ -14,7 +14,7 @@ from datetime import datetime
 import re
 
 from core.llm.qwen_api_client import QwenAPIClient, QwenMessage
-from core.config import LLM_CONFIG, MAX_CLIPS, API_KEY_ENV_VARS, SUPPORTED_LLM_PROVIDERS, EVENT_CLUSTER_GAP_SECONDS, GROUNDING_WINDOW_SECONDS, MAX_CONCURRENT_GROUNDINGS
+from core.config import LLM_CONFIG, MAX_CLIPS, API_KEY_ENV_VARS, SUPPORTED_LLM_PROVIDERS, EVENT_CLUSTER_GAP_SECONDS, GROUNDING_WINDOW_SECONDS, MAX_CONCURRENT_GROUNDINGS, DISALLOWED_GOAL_WINDOW_SECONDS
 from core.clip_duration import (
     build_clip_duration_prompt_section,
     get_clip_duration_preference,
@@ -603,7 +603,7 @@ IMPORTANT:
 - start_time and end_time should be in simple format (HH:MM:SS or MM:SS), NOT SRT format with milliseconds
 - Remove any "engagement_score" field if present
 - Ensure "why_engaging" is shorter than 100 characters
-- Use only approved tags: ["进球", "射门", "头球", "点球", "红牌", "黄牌", "扑救", "任意球", "角球", "越位", "VAR", "换人", "助攻", "反击", "庆祝", "绝杀", "逆转", "乌龙球", "明星球员", "战术亮点", "赛事高光", "战术解析", "球星表现", "历史纪录", "裁判争议", "数据分析", "教练布置", "阵型变化", "体能管理", "赛前分析", "赛后总结", "经典对决", "名嘴金句", "精彩集锦", "深度解析", "争议"]
+- Use only approved tags: ["进球", "射门", "头球", "点球", "红牌", "黄牌", "扑救", "任意球", "角球", "越位", "VAR", "换人", "助攻", "反击", "庆祝", "绝杀", "逆转", "乌龙球", "无效进球", "明星球员", "战术亮点", "赛事高光", "战术解析", "球星表现", "历史纪录", "裁判争议", "数据分析", "教练布置", "阵型变化", "体能管理", "赛前分析", "赛后总结", "经典对决", "名嘴金句", "精彩集锦", "深度解析", "争议"]
 
 Here is the malformed response:
 {malformed_response}
@@ -771,7 +771,56 @@ Please fix the JSON and return ONLY the valid JSON, no explanations:
             "total_moments": 0,
             "analysis_timestamp": datetime.now().isoformat() + 'Z'
         }
-    
+
+    def _retag_disallowed_goals(self, moments: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        """Detect goal events followed by VAR/offside within window, re-tag as 无效进球."""
+        var_keywords = {"越位", "VAR"}
+        goal_indices = []
+        var_indices = []
+
+        for i, m in enumerate(moments):
+            tags = set(m.get('tags', []))
+            if "进球" in tags:
+                goal_indices.append(i)
+            elif tags & var_keywords and m.get('event_type') == 'var':
+                var_indices.append(i)
+
+        remove_set = set()
+        for gi in goal_indices:
+            goal_m = moments[gi]
+            goal_time = self.time_to_seconds(
+                goal_m.get('anchor_time') or goal_m.get('start_time', '00:00:00')
+            )
+            for vi in var_indices:
+                if vi in remove_set:
+                    continue
+                var_m = moments[vi]
+                var_time = self.time_to_seconds(
+                    var_m.get('anchor_time') or var_m.get('start_time', '00:00:00')
+                )
+                if 0 < (var_time - goal_time) <= DISALLOWED_GOAL_WINDOW_SECONDS:
+                    # Re-tag as disallowed goal
+                    tags = [t for t in goal_m.get('tags', []) if t != '进球']
+                    if '无效进球' not in tags:
+                        tags.insert(0, '无效进球')
+                    if '射门' not in tags:
+                        tags.append('射门')
+                    for vt in var_m.get('tags', []):
+                        if vt in var_keywords and vt not in tags:
+                            tags.append(vt)
+                    goal_m['tags'] = tags
+                    goal_m['event_type'] = 'var'
+                    title = goal_m.get('title', '')
+                    if '无效' not in title and '取消' not in title and '越位' not in title:
+                        goal_m['title'] = title.rstrip('！!。') + '被判无效'
+                    remove_set.add(vi)
+                    logger.info(f"🚫 Disallowed goal: '{goal_m['title']}' (VAR at {var_m.get('anchor_time')})")
+                    break
+
+        if remove_set:
+            moments = [m for i, m in enumerate(moments) if i not in remove_set]
+        return moments
+
     async def aggregate_top_moments(self, highlights_files: List[str], output_dir: str) -> Dict[str, Any]:
         """
         Aggregate engaging moments from multiple chunks with event clustering.
@@ -825,6 +874,9 @@ Please fix the JSON and return ONLY the valid JSON, no explanations:
             deduplicated.append(best)
 
         logger.info(f"📊 Clustered {len(all_moments)} moments → {len(deduplicated)} unique events")
+
+        # Post-process: detect disallowed goals (进球 followed by VAR/越位 within window)
+        deduplicated = self._retag_disallowed_goals(deduplicated)
 
         top_moments = deduplicated[:self.max_clips]
         for i, moment in enumerate(top_moments):
@@ -1111,7 +1163,7 @@ The response should follow this structure:
 IMPORTANT:
 - start_time and end_time should be in simple format (HH:MM:SS or MM:SS), NOT SRT format with milliseconds
 - Ensure all timing information is preserved accurately
-- Use only approved tags: ["进球", "射门", "头球", "点球", "红牌", "黄牌", "扑救", "任意球", "角球", "越位", "VAR", "换人", "助攻", "反击", "庆祝", "绝杀", "逆转", "乌龙球", "明星球员", "战术亮点", "赛事高光", "战术解析", "球星表现", "历史纪录", "裁判争议", "数据分析", "教练布置", "阵型变化", "体能管理", "赛前分析", "赛后总结", "经典对决", "名嘴金句", "精彩集锦", "深度解析", "争议"]
+- Use only approved tags: ["进球", "射门", "头球", "点球", "红牌", "黄牌", "扑救", "任意球", "角球", "越位", "VAR", "换人", "助攻", "反击", "庆祝", "绝杀", "逆转", "乌龙球", "无效进球", "明星球员", "战术亮点", "赛事高光", "战术解析", "球星表现", "历史纪录", "裁判争议", "数据分析", "教练布置", "阵型变化", "体能管理", "赛前分析", "赛后总结", "经典对决", "名嘴金句", "精彩集锦", "深度解析", "争议"]
 
 Here is the malformed response:
 {malformed_response}
