@@ -1518,7 +1518,9 @@ def render_runtime_dashboard():
                 'cancelled': '⏹️'
             }.get(job.status.value, '❓')
 
-            display_source = job.video_source if len(job.video_source) <= 60 else job.video_source[:57] + '...'
+            video_info = (job.result or {}).get('video_info') or {}
+            video_title = video_info.get('title', '')
+            display_source = video_title if video_title else (job.video_source if len(job.video_source) <= 60 else job.video_source[:57] + '...')
 
             with st.expander(f"{status_emoji} {job.status.value.upper()} - {display_source}", expanded=(job.status.value == 'processing')):
                 col1, col2, col3 = st.columns([2, 2, 1])
@@ -1526,6 +1528,16 @@ def render_runtime_dashboard():
                 with col1:
                     st.write(f"**任务 ID:** `{job.id[:8]}...`")
                     st.write(f"**创建时间:** {job.created_at.strftime('%Y-%m-%d %H:%M:%S')}")
+                    if video_title:
+                        st.write(f"**视频标题:** {video_title}")
+                    if video_info.get('uploader'):
+                        st.write(f"**上传者:** {video_info['uploader']}")
+                    if video_info.get('duration'):
+                        dur = int(video_info['duration'])
+                        st.write(f"**时长:** {dur // 60}:{dur % 60:02d}")
+                    if not video_title:
+                        src_display = job.video_source if len(job.video_source) <= 80 else job.video_source[:77] + '...'
+                        st.caption(f"来源: {src_display}")
                     duration_placeholder = st.empty()
                     if job.status.value in ['completed', 'failed', 'cancelled']:
                         if job.completed_at and job.started_at:
