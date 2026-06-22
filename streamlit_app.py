@@ -1713,6 +1713,7 @@ if process_clicked:
         upload_metadata = None
         job_source = video_source
         if input_type == INPUT_TYPE_UPLOAD:
+            uploads_root = Path(st.session_state.uploads_root)
             upload_metadata = stage_uploaded_file(uploaded_file, uploads_root, current_owner_session_id)
             job_source = upload_metadata['staged_path']
             source_kind = SOURCE_KIND_UPLOADED_FILE

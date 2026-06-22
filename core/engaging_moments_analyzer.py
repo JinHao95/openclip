@@ -39,6 +39,7 @@ class EngagingMomentsAnalyzer:
         model: Optional[str] = None,
         base_url: Optional[str] = None,
         clip_length_preset: Optional[str] = None,
+        video_title: Optional[str] = None,
     ):
         """
         Initialize the analyzer
@@ -64,6 +65,8 @@ class EngagingMomentsAnalyzer:
         self.debug = debug
         self.model = model.strip() if model else None
         self.base_url = base_url.strip() if base_url else None
+        self.video_title = video_title.strip() if video_title else None
+        self.match_teams = self._extract_teams_from_title(self.video_title) if self.video_title else None
 
         if self.provider == "custom_openai" and not (
             self.model or LLM_CONFIG["custom_openai"]["default_model"]
@@ -117,6 +120,56 @@ class EngagingMomentsAnalyzer:
         except Exception as e:
             logger.error(f"Error loading background information: {e}")
             self.use_background = False
+
+    @staticmethod
+    def _extract_teams_from_title(title: str) -> Optional[Dict[str, str]]:
+        """Extract team names from video title like '德国2_1科特迪瓦' or '乌拉圭2-2佛得角'."""
+        if not title:
+            return None
+        # Remove emoji
+        cleaned = re.sub(r'[\U0001f300-\U0001f9ff\u200d\ufe0f]+', '', title).strip()
+        # Remove common prefixes/suffixes
+        cleaned = re.sub(r'(全场回放|全场集锦|精彩回放|比赛回放|球迷之家回放|开门红)', '', cleaned).strip()
+        # Match: TeamA <score> TeamB
+        m = re.match(r'^(.+?)(\d+)[_\-:：](\d+)(.+?)$', cleaned)
+        if m:
+            home = m.group(1).strip()
+            away = m.group(4).strip()
+            # Further clean: take only the last CJK/letter word as team name
+            # e.g. "xxx英格兰" -> "英格兰"
+            home_m = re.search(r'([\u4e00-\u9fff\w]+)$', home)
+            if home_m:
+                home = home_m.group(1)
+            return {'home': home, 'away': away}
+        # Match: "England 4-2 Croatia" style
+        m = re.match(r'^(.+?)\s+(\d+)\s*[-_:：]\s*(\d+)\s+(.+?)$', cleaned)
+        if m:
+            return {'home': m.group(1).strip(), 'away': m.group(4).strip()}
+        return None
+
+    def _build_team_context_prompt(self) -> str:
+        """Build prompt section for team identification in tags."""
+        if not self.match_teams:
+            return ""
+        home = self.match_teams['home']
+        away = self.match_teams['away']
+        return (
+            f"\n\n## 球队信息\n\n"
+            f"本场比赛双方球队：**{home}** vs **{away}**\n\n"
+            f"**重要**：对于进球（goal）、射门（shot）、扑救（save）等事件，"
+            f"请在 tags 中加入对应球队名称标签。规则：\n"
+            f"- 进球/射门：加入射门方球队名（如 \"{home}\" 或 \"{away}\"）\n"
+            f"- 扑救：加入扑救方门将所属球队名\n"
+            f"- 犯规/红黄牌：加入犯规方球队名\n"
+            f"- 如果无法从转录判断是哪支球队，则不加球队标签\n"
+        )
+
+    def set_video_title(self, title: str):
+        """Set video title and re-extract team info (call after download when title becomes known)."""
+        self.video_title = title.strip() if title else None
+        self.match_teams = self._extract_teams_from_title(self.video_title) if self.video_title else None
+        if self.match_teams:
+            logger.info(f"⚽ Detected teams from title: {self.match_teams['home']} vs {self.match_teams['away']}")
     
     def _export_debug_prompt(self, prompt_content: str, prompt_type: str, part_name: Optional[str] = None):
         """
@@ -316,6 +369,7 @@ class EngagingMomentsAnalyzer:
         prompt_parts.append(prompt_template)
         prompt_parts.append("\n\n")
         prompt_parts.append(build_clip_duration_prompt_section(self.clip_duration_preference.preset))
+        prompt_parts.append(self._build_team_context_prompt())
         if self.user_intent:
             prompt_parts.append(f"\n\n## User Focus\n\nThe user is specifically looking for: {self.user_intent}\nPrioritize moments related to this when selecting and ranking clips.")
         prompt_parts.append(f"\n\n## Transcript Data for {part_name}\n\n")
@@ -400,6 +454,7 @@ class EngagingMomentsAnalyzer:
 
         prompt_parts.append(prompt_template)
         prompt_parts.append("\n\n")
+        prompt_parts.append(self._build_team_context_prompt())
         if self.user_intent:
             prompt_parts.append(f"\n\n## 用户关注点\n\n用户特别关注：{self.user_intent}\n请优先标注与此相关的时刻。")
         prompt_parts.append(f"\n\n## Transcript Data for {chunk_name}\n\n")
@@ -439,6 +494,7 @@ class EngagingMomentsAnalyzer:
 
         prompt_parts.append(prompt_template)
         prompt_parts.append("\n\n")
+        prompt_parts.append(self._build_team_context_prompt())
         if self.user_intent:
             prompt_parts.append(f"\n\n## 用户关注点\n\n用户特别关注：{self.user_intent}\n请优先标注与此相关的时刻。")
         prompt_parts.append(f"\n\n## Transcript Data for {chunk_name}\n\n")

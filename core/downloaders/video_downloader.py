@@ -143,12 +143,10 @@ class VideoDownloader:
             logger.info("🎬 Detected platform: YouTube")
             video_info = await self.youtube_downloader.get_video_info(url)
             return video_info.to_dict()
-        elif platform == 'xiaohongshu':
-            logger.info("🎬 Detected platform: Xiaohongshu")
+        else:
+            logger.info(f"🎬 Detected platform: {platform or 'generic URL'}, using yt-dlp")
             video_info = await self.youtube_downloader.get_video_info(url)
             return video_info.to_dict()
-        else:
-            raise ValueError(f"Unsupported platform or invalid URL: {url}")
 
     async def download_video(
         self,
@@ -174,18 +172,11 @@ class VideoDownloader:
             return await self.bilibili_downloader.download_video(
                 url, custom_filename, progress_callback
             )
-        elif platform == 'youtube':
-            logger.info("🎬 Downloading from YouTube...")
-            return await self.youtube_downloader.download_video(
-                url, custom_filename, progress_callback
-            )
-        elif platform == 'xiaohongshu':
-            logger.info("🎬 Downloading from Xiaohongshu...")
-            return await self.youtube_downloader.download_video(
-                url, custom_filename, progress_callback
-            )
         else:
-            raise ValueError(f"Unsupported platform or invalid URL: {url}")
+            logger.info(f"🎬 Downloading from {platform or 'generic URL'}...")
+            return await self.youtube_downloader.download_video(
+                url, custom_filename, progress_callback
+            )
 
 
 class DownloadProcessor:

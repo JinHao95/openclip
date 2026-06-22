@@ -363,6 +363,10 @@ class VideoOrchestrator:
             safe_video_name = FileStringUtils.sanitize_filename(video_name)
             video_root_dir = self.output_dir / safe_video_name
             video_root_dir.mkdir(parents=True, exist_ok=True)
+
+            # Inject video title into analyzer for team detection
+            if self.engaging_moments_analyzer:
+                self.engaging_moments_analyzer.set_video_title(video_name)
             
             # Step 2: Prepare splits directory
             logger.info("⏱️  Step 2: Preparing video for processing...")
