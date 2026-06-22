@@ -177,8 +177,8 @@ SUBTITLE_TRANSLATION_LAUNCH_STAGGER_SECONDS: float = max(
 )
 
 
-# ASR engine: "whisper" (CPU CLI), "whisperx" (GPU faster-whisper), "llm" (API-based)
-ASR_ENGINE: str = os.getenv("ASR_ENGINE", "whisperx")
+# ASR engine: "whisper" (CPU CLI), "whisperx" (GPU faster-whisper), "paraformer" (FunASR Chinese), "llm" (API-based)
+ASR_ENGINE: str = os.getenv("ASR_ENGINE", "paraformer")
 ASR_WHISPERX_MODEL: str = os.getenv("ASR_WHISPERX_MODEL", "small")
 ASR_WHISPERX_BATCH_SIZE: int = _env_int("ASR_WHISPERX_BATCH_SIZE", 16)
 

@@ -34,7 +34,7 @@ from core.browser_session import (
     normalize_input_type,
     reset_browser_state,
 )
-from core.clip_concat import concat_clips
+from core.clip_concat import concat_clips, detect_watermark_region
 from core.file_string_utils import FileStringUtils
 from core.subtitle_burner import SubtitleBurner, SubtitleStyleConfig
 # Import the video orchestrator
@@ -654,7 +654,7 @@ def display_results(result):
                     if all_tags:
                         selected_tags = st.multiselect("🏷 按标签筛选", all_tags, default=[], key="clip_tag_filter")
                         if selected_tags:
-                            filtered_clips = [c for c in filtered_clips if any(t in selected_tags for t in c.get('tags', []))]
+                            filtered_clips = [c for c in filtered_clips if all(t in c.get('tags', []) for t in selected_tags)]
                     # Select all / deselect all
                     sel_col1, sel_col2 = st.columns(2)
                     with sel_col1:
@@ -703,10 +703,49 @@ def display_results(result):
                         order_indices.sort(key=lambda x: x[0])
                         ordered_paths = [p for _, p in order_indices]
 
+                        bgm_url = st.text_input("🎵 BGM链接 (可选)", placeholder="输入BGM音频URL，留空则无背景音乐", key="bgm_url_input")
+                        bgm_upload = st.file_uploader("🎵 或上传本地BGM", type=["mp3", "wav", "m4a", "aac"], key="bgm_upload")
+                        bgm_source = None
+                        if bgm_upload:
+                            bgm_tmp = output_dir / f"_bgm_{bgm_upload.name}"
+                            bgm_tmp.write_bytes(bgm_upload.getvalue())
+                            bgm_source = str(bgm_tmp)
+                        elif bgm_url:
+                            bgm_source = bgm_url
+                        bgm_volume = st.slider("BGM音量", 0.05, 0.5, 0.15, 0.05, key="bgm_volume") if bgm_source else 0.15
+
+                        opt_cols = st.columns(2)
+                        with opt_cols[0]:
+                            remove_audio = st.checkbox("🔇 去除原声", key="remove_audio_toggle")
+                        with opt_cols[1]:
+                            remove_watermark = st.checkbox("🚫 去水印 (LLM检测)", key="remove_watermark_toggle")
+
                         if st.button("🎬 生成高光合集视频"):
+                            watermark_region = None
+                            if remove_watermark and ordered_paths:
+                                with st.spinner("正在检测水印位置（多帧分析）..."):
+                                    try:
+                                        from core.llm.custom_openai_api_client import CustomOpenAIAPIClient
+                                        from core.config import LLM_CONFIG, API_KEY_ENV_VARS
+                                        api_key = data.get('api_key') or os.environ.get(API_KEY_ENV_VARS.get(data.get('llm_provider', 'custom_openai'), ''))
+                                        provider = data.get('llm_provider', 'custom_openai')
+                                        ps = data.get('llm_provider_settings', {}).get(provider, {})
+                                        base_url = ps.get('base_url') or LLM_CONFIG.get(provider, {}).get('base_url')
+                                        model = ps.get('model') or LLM_CONFIG.get(provider, {}).get('default_model')
+                                        llm_client = CustomOpenAIAPIClient(api_key=api_key, base_url=base_url)
+                                        watermark_region = detect_watermark_region(ordered_paths[0], llm_client, model=model)
+                                        if watermark_region:
+                                            st.info(f"检测到水印区域: x={watermark_region['x']}, y={watermark_region['y']}, {watermark_region['w']}x{watermark_region['h']}")
+                                        else:
+                                            st.warning("多帧均未检测到水印，跳过去水印")
+                                    except Exception as e:
+                                        st.warning(f"水印检测失败: {e}")
+
                             compilation_path = str(output_dir / "highlight_compilation.mp4")
                             with st.spinner("正在拼接高光合集..."):
-                                ok = concat_clips(ordered_paths, compilation_path)
+                                ok = concat_clips(ordered_paths, compilation_path, bgm_url=bgm_source,
+                                                  bgm_volume=bgm_volume, remove_audio=remove_audio,
+                                                  watermark_region=watermark_region)
                             if ok and Path(compilation_path).exists():
                                 st.success("合集视频生成成功！")
                                 st.video(compilation_path)
