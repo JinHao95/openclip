@@ -1,5 +1,6 @@
 [server]
 maxUploadSize = 500
+enableStaticServing = true
 
 [theme]
 base = "light"

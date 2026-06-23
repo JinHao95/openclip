@@ -180,7 +180,7 @@ class YouTubeDownloader:
         """Get format selector based on quality preference"""
         if self.quality == "best":
             # Prefer H.264 codec for better compatibility
-            return "bestvideo[vcodec^=avc1][ext=mp4][height<=1080]+bestaudio[ext=m4a]/bestvideo[ext=mp4][height<=1080]+bestaudio[ext=m4a]/best[ext=mp4]/best"
+            return "bestvideo[vcodec^=avc1][ext=mp4]+bestaudio[ext=m4a]/bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best"
         elif self.quality == "worst":
             return "worst"
         elif self.quality == "audio":

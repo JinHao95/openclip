@@ -35,6 +35,19 @@ from core.browser_session import (
     reset_browser_state,
 )
 from core.clip_concat import concat_clips, detect_watermark_region
+
+
+def _stable_video_url(clip_path: Path) -> str | None:
+    """Convert a clip file path to a stable static URL that survives reruns."""
+    clip_path = Path(clip_path).resolve()
+    pv_root = Path(__file__).parent.resolve() / "processed_videos"
+    try:
+        rel = clip_path.relative_to(pv_root)
+        from urllib.parse import quote
+        mtime = int(clip_path.stat().st_mtime) if clip_path.exists() else 0
+        return f"/app/static/{quote(str(rel))}?v={mtime}"
+    except ValueError:
+        return None
 from core.file_string_utils import FileStringUtils
 from core.subtitle_burner import SubtitleBurner, SubtitleStyleConfig
 # Import the video orchestrator
@@ -191,7 +204,7 @@ TRANSLATIONS = {
         'cookie_mode_none': 'No cookies',
         'cookie_browser': 'Cookie Browser',
         'cookie_browser_help': 'Use cookies extracted from this browser for remote video downloads.',
-        'cookies_file': 'Cookies File Path (optional)',
+        'cookies_file': 'Upload Cookies File (optional)',
         'use_background': 'Use Background Info',
         'user_intent': 'What are you looking for? (optional)',
         'user_intent_help': 'Describe what you want to find, e.g. "Messi\'s solo dribbles" or "all goals and saves". Leave blank to auto-detect highlights based on content type (e.g. goals, shots, saves for sports).',
@@ -262,7 +275,7 @@ TRANSLATIONS = {
         'select_title_style': 'Select the visual style for titles and covers',
         'select_language': 'Language for analysis and output',
         'enter_output_dir': 'Directory to save processed videos',
-        'cookies_file_help': 'Optional path to a Netscape-format cookies.txt file. When provided, it overrides browser cookie extraction.',
+        'cookies_file_help': 'Upload a Netscape-format cookies.txt file. Export via browser extension "Get cookies.txt LOCALLY".',
         'force_whisper_help': 'Ignore platform subtitles and force local ASR generation. English uses Whisper; Chinese uses Paraformer.',
         'generate_clips_help': 'Generate video clips for engaging moments',
         'max_clips_help': 'Maximum number of highlight clips to generate',
@@ -312,7 +325,7 @@ TRANSLATIONS = {
         'cookie_mode_none': '不使用 cookies',
         'cookie_browser': 'Cookie 浏览器',
         'cookie_browser_help': '使用此浏览器中的 cookies 下载远程视频。',
-        'cookies_file': 'Cookies 文件路径（可选）',
+        'cookies_file': '上传 Cookies 文件（可选）',
         'use_background': '使用背景信息提示词',
         'user_intent': '你想找什么？（可选）',
         'user_intent_help': '描述你想找的内容，例如"梅西的个人突破"或"所有进球和关键扑救"。留空则根据内容类型自动识别高光（如足球会找进球、射门、扑救等）。',
@@ -382,7 +395,7 @@ TRANSLATIONS = {
         'select_title_style': '选择标题和封面的视觉风格',
         'select_language': '分析和输出的语言',
         'enter_output_dir': '保存处理后视频的目录',
-        'cookies_file_help': '可选的 Netscape 格式 cookies.txt 文件路径。提供后会优先使用该文件，而不是从浏览器提取 cookie。',
+        'cookies_file_help': '上传 Netscape 格式的 cookies.txt 文件。可通过浏览器扩展「Get cookies.txt LOCALLY」导出。',
         'force_whisper_help': '忽略平台字幕并强制使用本地 ASR 生成字幕。英文走 Whisper，中文走 Paraformer。',
         'generate_clips_help': '为精彩时刻生成视频片段',
         'max_clips_help': '生成高光片段的最大数量',
@@ -680,7 +693,11 @@ def display_results(result):
                                     checked = st.checkbox("选择", key=f"select_clip_{i}", value=False)
                                     if checked:
                                         selected_clip_paths.append(str(clip_path))
-                                    st.video(str(clip_path), width=450)
+                                    stable_url = _stable_video_url(clip_path)
+                                    if stable_url:
+                                        st.video(stable_url, width=450)
+                                    else:
+                                        st.video(str(clip_path), width=450)
                                     time_range = clip.get('time_range', '')
                                     tags_str = ", ".join(clip.get('tags', []))
                                     caption = f"**#{clip.get('rank', i+1)} {clip.get('title', 'Untitled')}**"
@@ -705,12 +722,21 @@ def display_results(result):
 
                         bgm_url = st.text_input("🎵 BGM链接 (可选)", placeholder="输入BGM音频URL，留空则无背景音乐", key="bgm_url_input")
                         bgm_upload = st.file_uploader("🎵 或上传本地BGM", type=["mp3", "wav", "m4a", "aac"], key="bgm_upload")
+                        # Saved BGM library
+                        bgm_lib_dir = Path("bgm_library")
+                        bgm_lib_dir.mkdir(exist_ok=True)
+                        saved_bgms = sorted(bgm_lib_dir.glob("*.*"))
                         bgm_source = None
                         if bgm_upload:
-                            bgm_tmp = output_dir / f"_bgm_{bgm_upload.name}"
-                            bgm_tmp.write_bytes(bgm_upload.getvalue())
-                            bgm_source = str(bgm_tmp)
-                        elif bgm_url:
+                            save_path = bgm_lib_dir / bgm_upload.name
+                            save_path.write_bytes(bgm_upload.getvalue())
+                            bgm_source = str(save_path)
+                        elif saved_bgms:
+                            bgm_names = ["不使用已保存BGM"] + [f.name for f in saved_bgms]
+                            selected_bgm = st.selectbox("🎶 或选择已保存BGM", bgm_names, key="bgm_saved_select")
+                            if selected_bgm != "不使用已保存BGM":
+                                bgm_source = str(bgm_lib_dir / selected_bgm)
+                        if not bgm_source and bgm_url:
                             bgm_source = bgm_url
                         bgm_volume = st.slider("BGM音量", 0.05, 0.5, 0.15, 0.05, key="bgm_volume") if bgm_source else 0.15
 
@@ -748,7 +774,11 @@ def display_results(result):
                                                   watermark_region=watermark_region)
                             if ok and Path(compilation_path).exists():
                                 st.success("合集视频生成成功！")
-                                st.video(compilation_path)
+                                stable_url = _stable_video_url(Path(compilation_path))
+                                if stable_url:
+                                    st.video(stable_url)
+                                else:
+                                    st.video(compilation_path)
                             else:
                                 st.error("合集视频生成失败，请检查日志。")
 
@@ -791,7 +821,11 @@ def display_results(result):
                     for i, (clip_path, clip_title, time_range) in enumerate(clips_to_show):
                         if clip_path.exists():
                             with cols[i % 2]:
-                                st.video(str(clip_path), width=450)
+                                stable_url = _stable_video_url(clip_path)
+                                if stable_url:
+                                    st.video(stable_url, width=450)
+                                else:
+                                    st.video(str(clip_path), width=450)
                                 caption = f"**{clip_title}**"
                                 if time_range:
                                     caption += f"  \n⏱ {time_range}"
@@ -998,14 +1032,21 @@ with st.sidebar:
             data['cookies_file'] = ""
             cookies_file = ""
         elif cookie_mode == 'file':
-            cookies_file = st.text_input(
+            cookie_upload = st.file_uploader(
                 t['cookies_file'],
-                value=data.get('cookies_file', ''),
+                type=["txt"],
                 help=t['cookies_file_help'],
-                placeholder="cookies.txt",
-                key=f"cookies_file_{st.session_state.reset_counter}"
+                key=f"cookies_file_{st.session_state.reset_counter}",
             )
-            data['cookies_file'] = cookies_file
+            if cookie_upload:
+                cookie_save_path = Path("cookies") / cookie_upload.name
+                cookie_save_path.parent.mkdir(exist_ok=True)
+                cookie_save_path.write_bytes(cookie_upload.getvalue())
+                cookies_file = str(cookie_save_path)
+                data['cookies_file'] = cookies_file
+                st.success(f"✅ Cookie 文件已保存: {cookies_file}")
+            else:
+                cookies_file = data.get('cookies_file', '')
             if cookies_file and not Path(cookies_file).is_file():
                 st.caption("⚠️ Cookies file not found. Download will fail until this path is corrected.")
         else:

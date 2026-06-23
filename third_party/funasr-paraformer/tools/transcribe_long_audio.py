@@ -308,19 +308,19 @@ def run_punc_segments(
     texts: list[str],
     disable_pbar: bool,
 ) -> list[str]:
-    results = []
-    for text in texts:
-        if not text:
-            results.append("")
-            continue
-        kwargs = copy.deepcopy(model.punc_kwargs)
-        restored = model.inference(
-            text,
-            model=model.punc_model,
-            kwargs=kwargs,
-            disable_pbar=disable_pbar,
-        )[0]
-        results.append(restored.get("text", text).strip())
+    non_empty = [(i, t) for i, t in enumerate(texts) if t]
+    if not non_empty:
+        return [""] * len(texts)
+    kwargs = copy.deepcopy(model.punc_kwargs)
+    batch_results = model.inference(
+        [t for _, t in non_empty],
+        model=model.punc_model,
+        kwargs=kwargs,
+        disable_pbar=disable_pbar,
+    )
+    results = [""] * len(texts)
+    for idx, (orig_i, orig_t) in enumerate(non_empty):
+        results[orig_i] = batch_results[idx].get("text", orig_t).strip()
     return results
 
 

@@ -14,7 +14,7 @@ from datetime import datetime
 import re
 
 from core.llm.qwen_api_client import QwenAPIClient, QwenMessage
-from core.config import LLM_CONFIG, MAX_CLIPS, API_KEY_ENV_VARS, SUPPORTED_LLM_PROVIDERS, EVENT_CLUSTER_GAP_SECONDS, GROUNDING_WINDOW_SECONDS, MAX_CONCURRENT_GROUNDINGS, DISALLOWED_GOAL_WINDOW_SECONDS
+from core.config import LLM_CONFIG, MAX_CLIPS, API_KEY_ENV_VARS, SUPPORTED_LLM_PROVIDERS, EVENT_CLUSTER_GAP_SECONDS, GROUNDING_WINDOW_SECONDS, MAX_CONCURRENT_GROUNDINGS, DISALLOWED_GOAL_WINDOW_SECONDS, LLM_AGGREGATION_ENABLED
 from core.clip_duration import (
     build_clip_duration_prompt_section,
     get_clip_duration_preference,
@@ -772,6 +772,68 @@ Please fix the JSON and return ONLY the valid JSON, no explanations:
             "analysis_timestamp": datetime.now().isoformat() + 'Z'
         }
 
+    async def _llm_aggregate_events(self, moments: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        """Use LLM to semantically deduplicate events (merge replays/discussions of same real event)."""
+        if len(moments) < 5:
+            return moments
+
+        # Load aggregation prompt
+        prompt_path = Path(__file__).parent.parent / "prompts" / "event_aggregation_requirement.md"
+        try:
+            system_prompt = prompt_path.read_text(encoding='utf-8')
+        except FileNotFoundError:
+            logger.warning("event_aggregation_requirement.md not found, skipping LLM aggregation")
+            return moments
+
+        # Build simplified event list for LLM
+        events_for_llm = []
+        for i, m in enumerate(moments):
+            events_for_llm.append({
+                "index": i,
+                "title": m.get('title', ''),
+                "anchor_time": m.get('anchor_time') or m.get('start_time', '00:00:00'),
+                "event_type": m.get('event_type', ''),
+                "importance": m.get('importance', ''),
+                "tags": m.get('tags', []),
+                "summary": m.get('summary', ''),
+            })
+
+        user_msg = f"以下是 {len(events_for_llm)} 个候选事件，请合并重复事件：\n\n```json\n{json.dumps(events_for_llm, ensure_ascii=False, indent=1)}\n```"
+
+        try:
+            loop = asyncio.get_event_loop()
+            full_prompt = f"{system_prompt}\n\n---\n\n{user_msg}"
+            response = await loop.run_in_executor(
+                None, lambda: self.llm_client.simple_chat(full_prompt, model=self.model)
+            )
+
+            # Parse response JSON
+            json_match = re.search(r'\[.*\]', response, re.DOTALL)
+            if not json_match:
+                logger.warning("LLM aggregation: no JSON array in response, skipping")
+                return moments
+            merge_result = json.loads(json_match.group())
+
+            # Apply merges: keep only the keep_index events
+            keep_indices = set()
+            for group in merge_result:
+                ki = group.get('keep_index')
+                if isinstance(ki, int) and 0 <= ki < len(moments):
+                    keep_indices.add(ki)
+
+            if not keep_indices:
+                logger.warning("LLM aggregation: no valid keep_indices, skipping")
+                return moments
+
+            merged_count = len(moments) - len(keep_indices)
+            if merged_count > 0:
+                logger.info(f"🔗 LLM aggregation: {len(moments)} → {len(keep_indices)} events ({merged_count} merged)")
+
+            return [m for i, m in enumerate(moments) if i in keep_indices]
+
+        except Exception as e:
+            logger.warning(f"LLM aggregation failed, using original list: {e}")
+            return moments
     def _retag_disallowed_goals(self, moments: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         """Detect goal events followed by VAR/offside within window, re-tag as 无效进球."""
         var_keywords = {"越位", "VAR"}
@@ -874,6 +936,10 @@ Please fix the JSON and return ONLY the valid JSON, no explanations:
             deduplicated.append(best)
 
         logger.info(f"📊 Clustered {len(all_moments)} moments → {len(deduplicated)} unique events")
+
+        # LLM-based semantic deduplication (merge replays/discussions of same event)
+        if LLM_AGGREGATION_ENABLED:
+            deduplicated = await self._llm_aggregate_events(deduplicated)
 
         # Post-process: detect disallowed goals (进球 followed by VAR/越位 within window)
         deduplicated = self._retag_disallowed_goals(deduplicated)
