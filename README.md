@@ -17,6 +17,12 @@
 
 ## 📢 最新动态
 
+- **2026-06-23**:
+  - ASR 引擎升级：中文转录默认使用 FunASR Paraformer，标点恢复 batch 化加速 ~14x
+  - 去除视频下载分辨率限制，支持 4K 视频下载（取决于源视频实际分辨率）
+  - 新增 BGM 库：上传的 BGM 自动保存，下次可直接选择复用
+  - Cookie 设置改为文件上传模式，适配无浏览器的服务器环境
+  - 视频预览链接改用静态 URL，不再因页面刷新失效
 - **2026-05-20**:
   - 新增片段时长预设：Streamlit 与 CLI 支持选择 `Auto (30s-3m)`、`30s-60s`、`60s-90s`、`90s-3m`、`3m-5m`
 - **2026-04-23**:
@@ -67,7 +73,7 @@
 <video src="https://github.com/user-attachments/assets/1ddf8318-f6ad-418c-9c4c-bbac0dedc668" controls width="600" height="450"></video>
 
 ## ✨ 特性
-- **灵活输入**：支持 Bilibili、YouTube URL 或本地视频文件
+- **灵活输入**：支持 Bilibili、YouTube、小红书 URL 或本地视频文件，支持最高 4K 分辨率下载
 - **智能转录**：优先使用平台字幕；本地 ASR 会自动按语言路由，英文使用 Whisper，中文使用 Paraformer
 - **说话人识别**（预览版）：自动识别谁在说话，将真实姓名标注到字幕中，适合访谈、座谈、辩论和播客
 - **AI 分析**：基于内容、互动和娱乐价值识别精彩时刻；支持 `--user-intent` 引导 AI 聚焦特定关注点
@@ -366,8 +372,8 @@ uv run python video_orchestrator.py \
 远程视频下载有时会遇到登录验证、风控或平台限制。OpenClip 支持三种模式：
 
 - `不使用 cookies`：先尝试最简单的公开访问方式
-- `浏览器 cookies`：使用本机浏览器中的登录态
-- `Cookies 文件`：使用导出的 Netscape 格式 `cookies.txt`
+- `上传 Cookies 文件`：在界面上传导出的 Netscape 格式 `cookies.txt`（适合服务器无浏览器场景）
+- `浏览器 cookies`：使用本机浏览器中的登录态（需本机有浏览器）
 
 **推荐尝试顺序：**
 
